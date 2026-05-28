@@ -1,0 +1,199 @@
+%% ============================================================
+%%  §3  The Execution Monad
+%% ============================================================
+
+\section{The Execution Monad}
+\label{sec:monad}
+
+The semantic foundation of lean-pl-verify is a state-error monad that captures
+the observable behaviour of safe Rust and TypeScript programs: they compute
+with local state, and they may panic. This section presents the monad
+definition, its basic properties, and the forward-backward model for mutable
+references.
+
+\subsection{Panic Reasons and Integer Bounds}
+\label{sec:types}
+
+Rust programs can panic at runtime for several distinct reasons. We enumerate
+them as an inductive type:
+
+\begin{lstlisting}[caption={PanicReason inductive type.},label={lst:panic}]
+inductive PanicReason where
+  | arithmeticOverflow
+  | divisionByZero
+  | explicitPanic
+  | indexOutOfBounds
+\end{lstlisting}
+
+This enumeration is not exhaustive with respect to production Rust (stack
+overflow and foreign panics are excluded), but it covers every panic that
+can arise in the safe Rust fragment we target.
+
+Integer arithmetic is modelled over \texttt{Int} (Lean's unbounded integer
+type), with explicit bounds checks at the point of each operation. The bounds
+for 32-bit signed integers are:
+
+\begin{lstlisting}[caption={Integer bounds.},label={lst:bounds}]
+namespace IntBounds
+  def minI32 : Int := -(2^31)     -- -2147483648
+  def maxI32 : Int :=  2^31 - 1  --  2147483647
+end IntBounds
+\end{lstlisting}
+
+Using \texttt{Int} rather than a fixed-width type (\eg Lean's \texttt{Int32})
+simplifies the proof theory significantly: the \texttt{omega} and \texttt{linarith}
+tactics operate natively on \texttt{Int}, whereas proofs about \texttt{Int32}
+would require constant casts and bitwidth reasoning. The trade-off is that
+overflow is a proof obligation rather than a type invariant; every arithmetic
+theorem must carry explicit preconditions of the form
+$\texttt{minI32} \le v \wedge v \le \texttt{maxI32}$.
+
+\subsection{The RustM Monad}
+
+\begin{lstlisting}[caption={RustM monad definition.},label={lst:rustm}]
+def RustM (s : Type) (a : Type) :=
+  StateT s (Except PanicReason) a
+\end{lstlisting}
+
+\texttt{RustM}~$\sigma$~$\alpha$ is a computation that: reads and writes a
+state of type $\sigma$ (modelling local variables), may return a value of
+type $\alpha$, and may instead panic with a \texttt{PanicReason}. The
+\texttt{StateT} transformer and \texttt{Except} type are both defined in
+Lean~4's core library as \texttt{def}s, so they are kernel-transparent.
+
+Monad operations are inherited from the transformer stack:
+
+\begin{lstlisting}[caption={Derived monad operations.},label={lst:monadops}]
+-- Fail with a panic reason
+def rpanic (r : PanicReason) : RustM s a :=
+  fun _ => .error r
+
+-- Safe division: panics on zero denominator
+def rdiv (a b : Int) : RustM s Int :=
+  if b = 0 then rpanic .divisionByZero
+  else pure (a / b)
+
+-- Checked addition: panics on overflow
+def raddChecked (a b : Int) : RustM s Int :=
+  let v := a + b
+  if minI32 <= v /\ v <= maxI32 then pure v
+  else rpanic .arithmeticOverflow
+\end{lstlisting}
+
+Two monad laws are proved as standalone lemmas and used in the
+\ProgramSpec reasoning in \S\ref{sec:programspec}:
+
+\begin{lstlisting}[caption={Monad laws for RustM.},label={lst:monadlaws}]
+theorem bind_ok {s a b : Type}
+    (f : RustM s a) (g : a -> RustM s b)
+    (s : s) (a : a) (s' : s)
+    (h : f s = .ok (a, s')) :
+    (f >>= g) s = g a s' := by
+  simp [bind, StateT.bind, h]
+
+theorem pure_ok {s a : Type} (a : a) (s : s) :
+    (pure a : RustM s a) s = .ok (a, s) := rfl
+\end{lstlisting}
+
+These look trivial, but their role is structural: they let the \ProgramSpec
+combinators in \S\ref{sec:programspec} reason about bound computations without
+re-expanding monad definitions in every proof.
+
+\subsection{Kernel Transparency}
+
+A critical design constraint is that \RustM must be \emph{kernel-transparent}:
+the Lean kernel must be able to reduce expressions of type
+\texttt{RustM\;$\sigma$\;$\alpha$} to their normal forms during type-checking.
+
+This is satisfied by definition: \texttt{StateT}, \texttt{Except}, and all
+derived operations are \texttt{def}s with no \texttt{@[extern]} or
+\texttt{@[opaque]} attributes. Lean's kernel reduction will unfold all of
+them when checking a proof term. The practical consequence is that proofs of
+the form \texttt{evalFun [] f 30 args at init |= P} can often be closed
+by \texttt{rfl} when \texttt{P} is a \texttt{pureOutput} spec and the
+evaluation terminates concretely.
+
+This transparency extends to our \emph{Value} type:
+
+\begin{lstlisting}[caption={Value and Locals types.},label={lst:value}]
+inductive Value where
+  | int   : Int  -> Value
+  | bool_ : Bool -> Value
+  | unit  : Value
+
+abbrev Locals := List Value
+\end{lstlisting}
+
+Using \texttt{List Value} for local variable storage means that all variable
+accesses (\texttt{List.getElem?}, \texttt{List.set}) are also kernel-transparent
+standard library functions.
+
+\subsection{The Forward-Backward Model for Mutable References}
+\label{sec:fbpair}
+
+Safe Rust frequently passes mutable references as function arguments. Consider
+the canonical example from the Aeneas literature~\cite{ho2022aeneas}:
+
+\begin{verbatim}
+fn choose<'a, T>(b: bool, x: &'a mut T, y: &'a mut T)
+    -> &'a mut T {
+  if b { x } else { y }
+}
+\end{verbatim}
+
+The function returns a mutable reference to one of its inputs. The caller
+may then mutate through the returned reference; the mutation must propagate
+back to \texttt{x} or \texttt{y} depending on which branch was taken.
+
+In a purely functional model, this is encoded using a pair of functions:
+
+\begin{lstlisting}[caption={FBPair: forward-backward representation.},label={lst:fbpair}]
+structure FBPair (a b : Type) where
+  fwd : a -> b
+  bwd : a -> b -> a
+
+-- forward: b=true => fwd selects x; b=false => fwd selects y
+-- backward: propagates updated value back to the chosen input
+\end{lstlisting}
+
+The \texttt{fwd} function (forward) computes the result of selecting a branch.
+The \texttt{bwd} function (backward) takes the original input and the updated
+output and returns the updated input — modelling the lifetime-end propagation.
+
+Four identity laws are proved:
+
+\begin{lstlisting}[caption={FBPair identity laws.},label={lst:fblaws}]
+theorem fwd_true (x y : a) :
+    choose_fwd true x y = x := rfl
+
+theorem fwd_false (x y : a) :
+    choose_fwd false x y = y := rfl
+
+theorem identity_true (x y x' : a) :
+    choose_bwd true x y x' = x' := rfl
+
+theorem identity_false (x y y' : a) :
+    choose_bwd false x y y' = y' := rfl
+\end{lstlisting}
+
+These four theorems constitute the \emph{forward-backward identity laws}:
+applying the backward function with the forward result returns the input
+unchanged. They are the functional analogue of the borrow-lifetime protocol
+and suffice to reason about any function that selects a borrow based on
+a pure condition.
+
+\subsection{Comparison with Dijkstra Monads}
+
+The LOOM~\cite{loom2026} and F$^\star$~\cite{fstar2016} approaches use Dijkstra
+monads~\cite{dijkstraMonads2019}, which are indexed by pre- and post-conditions
+in a way that generates verification conditions automatically. \RustM is
+deliberately simpler: it is a plain monad without WP-index.
+
+The choice reflects our use case. Dijkstra monads excel when the goal is to
+automatically generate proof obligations from program code. Our goal is
+different: we want to state explicit, human-readable specifications
+(\ProgramSpec) and prove them by hand using Lean tactics. A plain monad
+leaves the specification structure fully in the user's control and avoids
+the complexity of a WP-monad universe hierarchy. Whether Dijkstra monads
+would further automate the loop invariant proofs in \S\ref{sec:rust-proofs}
+is an interesting open question we leave for future work.

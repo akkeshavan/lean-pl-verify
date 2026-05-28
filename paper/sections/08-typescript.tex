@@ -1,0 +1,333 @@
+%% ============================================================
+%%  §8  TypeScript Extension and Cross-Language Unification
+%% ============================================================
+
+\section{TypeScript Extension and Cross-Language Unification}
+\label{sec:typescript}
+
+The TypeScript extension demonstrates that the \RustM monad and \ProgramSpec
+specification language are genuinely language-agnostic.
+\texttt{TypeScript/ElabSpec.lean} contains \textbf{33 theorems} (0 sorry)
+covering 14 TypeScript functions — including a \texttt{while} loop — and
+6 cross-language unification theorems that formally assert both a Rust and a
+TypeScript implementation satisfy the \emph{same} specification.
+An additional \textbf{6 theorems} in \texttt{TypeScript/BugDetection.lean}
+demonstrate how the kernel acts as a bug oracle: it catches two classic
+programming errors and confirms the fixes, all by \rfl.
+
+\subsection{The Verified TypeScript Fragment}
+\label{sec:ts-fragment}
+
+TypeScript's execution model differs substantially from Rust's: dynamic
+typing, garbage collection, prototype-based objects, no ownership.
+The fragment we verify is a well-defined subset:
+
+\begin{center}
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Feature}                  & \textbf{Status} \\
+\midrule
+\texttt{number} (modelled as $\mathbb{Z}$) & Supported \\
+\texttt{boolean}                   & Supported \\
+\texttt{string} (constants and concatenation) & Partial (in evaluator; no theorems) \\
+Arithmetic, comparison, logical ops & Supported \\
+Strict equality (\texttt{===}), strict inequality (\texttt{!==}) & Supported \\
+\texttt{if}/\texttt{else}, ternary \texttt{?:} & Supported \\
+\texttt{while} loops with mutable variable update & Supported \\
+\texttt{let}/\texttt{const} bindings & Supported \\
+\texttt{typeof}                    & Supported \\
+\midrule
+Closures, arrow functions          & \textbf{Not supported} \\
+Objects (\texttt{\{\}}), prototype chain & \textbf{Not supported} \\
+Arrays (indexing in evaluator; no theorems) & Partial \\
+\texttt{async}/\texttt{await}, Promises & \textbf{Not supported} \\
+Type coercions (\texttt{==}, \texttt{+} on mixed types) & \textbf{Not supported} \\
+IEEE~754 floating-point (NaN, Infinity, \texttt{-0}) & \textbf{Not supported} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+The \texttt{number} type is modelled as $\mathbb{Z}$ (Lean's \texttt{Int})
+rather than IEEE~754 \texttt{double}. This is a deliberate simplification:
+integer arithmetic is exact under this model, which is sound for programs
+that only use integer-valued expressions. Programs depending on floating-point
+behaviour (NaN propagation, rounding, \texttt{-0}) are outside scope.
+
+\subsection{The TypeScript AST and Evaluator}
+
+\begin{lstlisting}[caption={TypeScript AST (actual definitions, selected).},
+                   label={lst:tsast}]
+inductive TSExpr where
+  | lit   (l : TSLit)                            -- numeric/boolean literal
+  | var   (idx : Nat)                            -- positional; idx 0 = first param
+  | binOp (op : String) (l r : TSExpr)
+  | unOp  (op : String) (e : TSExpr)
+  | ite   (cond thenE elseE : TSExpr)
+
+inductive TSStmt where
+  | skip
+  | return_ (e : TSExpr)
+  | const   (name : String) (ty : Option TSTy) (e : TSExpr) (k : TSStmt)
+  | set_    (idx : Nat) (e : TSExpr) (k : TSStmt)  -- mutable update env[idx]
+  | ite     (cond : TSExpr) (thenB elseB : TSStmt)
+  | while_  (cond : TSExpr) (body : TSStmt)
+  | seq     (s1 s2 : TSStmt)
+\end{lstlisting}
+
+\noindent
+\textbf{Key design choices:}
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Positional environments.} Variables are de Bruijn indices
+        (\texttt{var idx}) into a \texttt{List TSValue}. This makes
+        \texttt{evalExpr env (.var n) = env[n]?} kernel-transparent without
+        any string equality, enabling all branching proofs to go through by
+        \texttt{decide\_eq\_true/false} without sorry.
+
+  \item \textbf{\texttt{const} + \texttt{set\_}.} Immutable bindings push a
+        value to the front of the environment; \texttt{set\_} updates an existing
+        slot in place. This pair covers both functional-style local declarations
+        and imperative loop-variable mutation.
+
+  \item \textbf{Same monad.} \texttt{evalTSFun} returns \texttt{RustM Unit TSValue}
+        — exactly the type returned by \texttt{evalFun} for Rust. The common
+        return type is what makes cross-language unification statements type-check.
+\end{itemize}
+
+The evaluator follows the same fuel-parametric, \texttt{match}-on-\texttt{Except}
+discipline as the LLBC interpreter:
+
+\begin{lstlisting}[caption={TypeScript evaluator entry point.},label={lst:tseval}]
+def evalTSFun (f : TSFunDef) (fuel : Nat) (args : List TSValue) :
+    RustM Unit TSValue :=
+  fun _ =>
+    let initEnv : Env := args     -- positional; idx 0 = first arg
+    match evalStmt fuel f.body initEnv with
+    | Except.ok (.return_ v, _) => Except.ok (v, ())
+    | Except.ok (.next,     _)  => Except.error (.explicit "fell off end")
+    | Except.error e            => Except.error e
+    | _                         => Except.error (.explicit "break outside loop")
+\end{lstlisting}
+
+\subsection{Verified TypeScript Functions}
+
+The 14 functions proved correct are:
+\texttt{return42}, \texttt{id}, \texttt{neg}, \texttt{add}, \texttt{sub},
+\texttt{max}, \texttt{isZero}, \texttt{mul}, \texttt{min},
+\texttt{abs}, \texttt{not\_gate}, \texttt{clamp}, and \texttt{sum\_to}.
+The first 12 are pure functions; \texttt{sum\_to} uses a \texttt{while} loop.
+
+\paragraph{Pure functions.}
+For functions with no branches (e.g., \texttt{add}, \texttt{neg}), the proof
+is by \rfl — the kernel reduces the closed term to its value:
+
+\begin{lstlisting}[caption={T3: neg proved by rfl.},label={lst:tsneg}]
+def tsNegFun : TSFunDef := {
+  body := .return_ (.unOp "-" (.var 0))  -- x = args[0]
+  ...
+}
+theorem elab_ts_neg (x : Int) :
+    evalTSFun tsNegFun 10 [.num x] at () |= .pureOutput (· = .num (-x)) :=
+  ⟨.num (-x), (), rfl, rfl⟩
+\end{lstlisting}
+
+\paragraph{Branching functions.}
+For functions with conditionals (\texttt{max}, \texttt{abs}, \texttt{clamp}),
+we supply a branch hypothesis and use \texttt{decide\_eq\_true/false}
+in a two-pass simp:
+
+\begin{lstlisting}[caption={T10: abs (x $\ge$ 0 branch).},label={lst:tsabs}]
+theorem elab_ts_abs_nonneg (x : Int) (h : x ≥ 0) :
+    evalTSFun tsAbsFun 10 [.num x] at () |= .pureOutput (· = .num x) := by
+  refine ⟨.num x, (), ?_, rfl⟩
+  simp only [evalTSFun, tsAbsFun]
+  simp only [evalStmt, evalExpr, evalBinOp, evalLit,
+             List.getElem?_cons_zero, decide_eq_true h]
+\end{lstlisting}
+
+\paragraph{The while loop: sum\_to.}
+\texttt{sum\_to(n)} computes $0 + 1 + \cdots + (n-1)$.
+In TypeScript, this is a \texttt{while} loop over two mutable variables
+\texttt{s} (accumulator) and \texttt{i} (counter):
+
+\begin{lstlisting}[language=TypeScript,caption={TypeScript sum\_to source.},label={lst:tssumto}]
+function sum_to(n: number): number {
+  let s = 0;
+  let i = 0;
+  while (i < n) { s += i; i += 1; }
+  return s;
+}
+\end{lstlisting}
+
+The \texttt{TSFunDef} uses \texttt{const} to push \texttt{s} and \texttt{i}
+onto the positional environment (making \texttt{i = env[0]},
+\texttt{s = env[1]}, \texttt{n = env[2]}), and \texttt{set\_} to update
+them in-place each iteration:
+
+\begin{lstlisting}[caption={T14: tsSumToFun definition.},label={lst:tssumtofun}]
+def tsSumToFun : TSFunDef := {
+  name := "sum_to"; params := [⟨"n", .number, false⟩]; retTy := .number
+  body :=
+    .const "s" none (.lit (.num 0))     -- env = [0, n]
+    (.const "i" none (.lit (.num 0))    -- env = [0, 0, n]; i=0,s=1,n=2
+    (.seq
+      (.while_ (.binOp "<" (.var 0) (.var 2))   -- while i < n
+        (.set_ 1 (.binOp "+" (.var 1) (.var 0)) -- s = s + i
+        (.set_ 0 (.binOp "+" (.var 0) (.lit (.num 1))) -- i = i + 1
+          .skip)))
+      (.return_ (.var 1))))             -- return s
+  async_ := false
+}
+\end{lstlisting}
+
+The correctness theorems are ground instances proved by \rfl (the kernel
+evaluates the loop concretely):
+
+\begin{lstlisting}[caption={T14 ground instances.},label={lst:tssumtothm}]
+theorem elab_ts_sumTo_five :
+    evalTSFun tsSumToFun 100 [.num 5] at () |= .pureOutput (· = .num 10) :=
+  ⟨.num 10, (), rfl, rfl⟩
+
+theorem elab_ts_sumTo_ten :
+    evalTSFun tsSumToFun 100 [.num 10] at () |= .pureOutput (· = .num 45) :=
+  ⟨.num 45, (), rfl, rfl⟩
+\end{lstlisting}
+
+\subsection{Cross-Language Unification Theorems (U1--U6)}
+\label{sec:unification}
+
+Six unification theorems establish that Rust and TypeScript implementations
+satisfy the \emph{same} \ProgramSpec predicate:
+
+\begin{lstlisting}[caption={U1: max — same spec from both languages.},
+                   label={lst:unified}]
+theorem unified_max_either (a b : Int) :
+    (evalFun [] maxFun 10 [.int a, .int b] at () |=
+      .pureOutput (fun v => v = .int a ∨ v = .int b)) ∧
+    (evalTSFun tsMaxFun 10 [.num a, .num b] at () |=
+      .pureOutput (fun v => v = .num a ∨ v = .num b)) :=
+  ⟨elab_max_either a b, elab_ts_max_either a b⟩
+\end{lstlisting}
+
+\begin{lstlisting}[caption={U5: sum\_to — same spec from Rust loop and TypeScript while loop.},
+                   label={lst:unifiedsumto}]
+theorem unified_sumTo_ten :
+    (evalFun [] sumToFun 1000 [.int 10] at () |=
+      .pureOutput (· = .int 45)) ∧
+    (evalTSFun tsSumToFun 100 [.num 10] at () |=
+      .pureOutput (· = .num 45)) :=
+  ⟨elab_sumTo_ten, elab_ts_sumTo_ten⟩
+\end{lstlisting}
+
+\begin{lstlisting}[caption={U6: neg — symbolic unification.},label={lst:unifiedneg}]
+theorem unified_neg (x : Int) :
+    (evalFun [] negFun 10 [.int x] at () |= .pureOutput (· = .int (-x))) ∧
+    (evalTSFun tsNegFun 10 [.num x] at () |= .pureOutput (· = .num (-x))) :=
+  ⟨elab_neg x, elab_ts_neg x⟩
+\end{lstlisting}
+
+\noindent
+The full set of 6 unification theorems (U1--U6) covers
+\texttt{max} (either branch), \texttt{add} (no-crash), \texttt{min} (either),
+\texttt{mul} (no-crash), \texttt{sum\_to} (ground, n=10), and \texttt{neg} (symbolic).
+
+These theorems are the formal realisation of the paper's core claim:
+a single \ProgramSpec instance describes implementations in both languages.
+The proofs are simple conjunctions of the individual results; the substantive
+work is in establishing compatible specifications on each side.
+From a software-engineering perspective, if a function is later ported from
+Rust to TypeScript (or vice versa), the unification theorem formally certifies
+that the rewrite preserves the specification.
+
+\subsection{Bug Detection and Repair}
+\label{sec:ts-bug-detection}
+
+A key practical benefit of the deep-embedding approach is that the Lean kernel
+acts as a \emph{bug oracle}: if a function definition contains an error, a proof
+attempt immediately reveals the wrong computed value through a failed \rfl reduction.
+\texttt{TypeScript/BugDetection.lean} demonstrates two representative bugs.
+
+\paragraph{Bug B1: off-by-one in \texttt{sum\_to}.}
+The intended function computes $0 + 1 + \cdots + (n-1)$.
+The buggy version uses \texttt{<=} instead of \texttt{<} in the loop guard:
+
+\begin{lstlisting}[language=TypeScript,caption={Buggy TypeScript sum\_to.},label={lst:buggysum}]
+// BUG: condition should be i < n
+while (i <= n) { s += i; i += 1; }
+\end{lstlisting}
+
+\noindent
+This causes the loop to run for $i = 0, 1, \ldots, n$ (inclusive), computing
+$n(n{+}1)/2$ instead of $n(n{-}1)/2$.
+Attempting to prove \texttt{sum\_to\_buggy(5) = 10} fails:
+\texttt{⟨.num 10, (), rfl, rfl⟩} does not type-check because the kernel
+reduces the term to \texttt{.num 15}.
+Theorem B1 instead \emph{documents the bug} by proving the wrong value:
+
+\begin{lstlisting}[caption={B1: kernel confirms the off-by-one bug.},label={lst:b1}]
+theorem ts_sumTo_buggy_five :
+    evalTSFun tsSumToBuggyFun 100 [.num 5] at () |= .pureOutput (· = .num 15) :=
+  ⟨.num 15, (), rfl, rfl⟩   -- 15 = 0+1+2+3+4+5 (includes 5; should be 10)
+\end{lstlisting}
+
+\noindent
+Fixing the guard to \texttt{<} recovers the correct \texttt{tsSumToFun}, for which
+\texttt{elab\_ts\_sumTo\_five} (T13) proves the result is \texttt{.num 10}.
+
+\paragraph{Bug B2: wrong zero guard in \texttt{safeDiv}.}
+A safe-division function should return $a/b$ when $b \neq 0$ and $0$
+otherwise.  The buggy version guards on $b > 0$, silently returning $0$
+for negative divisors:
+
+\begin{lstlisting}[language=TypeScript,caption={Buggy TypeScript safeDiv.},label={lst:buggydiv}]
+// BUG: guard should be b !== 0
+function safeDivBuggy(a: number, b: number): number {
+  if (b > 0) return a / b;
+  return 0;
+}
+\end{lstlisting}
+
+\noindent
+Theorem B3 exposes the bug: the kernel evaluates \texttt{safeDivBuggy(10,~-2)}
+to \texttt{0}, not \texttt{-5}:
+
+\begin{lstlisting}[caption={B3: kernel exposes the wrong-guard bug.},label={lst:b3}]
+theorem ts_safeDiv_buggy_negative_divisor :
+    evalTSFun tsSafeDivBuggyFun 10 [.num 10, .num (-2)] at ()
+      |= .pureOutput (· = .num 0) :=
+  ⟨.num 0, (), rfl, rfl⟩    -- returns 0 for b=-2 (bug!)
+\end{lstlisting}
+
+\noindent
+Fixing the guard to \texttt{!==} yields \texttt{tsSafeDivFun}.
+Theorems B4--B6 verify all three cases: negative divisor returns $-5$,
+positive divisor returns $3$, and zero divisor safely returns $0$
+without panicking:
+
+\begin{lstlisting}[caption={B4--B6: fixed safeDiv verified for all divisor signs.},label={lst:b46}]
+theorem ts_safeDiv_correct_neg :
+    evalTSFun tsSafeDivFun 10 [.num 10, .num (-2)] at () |= .pureOutput (· = .num (-5)) :=
+  ⟨.num (-5), (), rfl, rfl⟩
+
+theorem ts_safeDiv_correct_zero :
+    evalTSFun tsSafeDivFun 10 [.num 10, .num 0] at () |= .pureOutput (· = .num 0) :=
+  ⟨.num 0, (), rfl, rfl⟩
+\end{lstlisting}
+
+\noindent
+All six bug-detection theorems are proved by \rfl.
+The proof methodology is the same as for correctness proofs: the only
+difference is that for the buggy theorems, the stated output value is the
+\emph{wrong} answer, serving as machine-certified documentation of the defect.
+
+\subsection{Absence of Sorry}
+
+All 39 TypeScript theorems (33 in \texttt{ElabSpec.lean} + 6 in \texttt{BugDetection.lean})
+are fully kernel-checked (0 sorry).
+The key enabler is the \textbf{positional environment}: because
+\texttt{env[n]?} reduces by \texttt{List.getElem?} without any
+\texttt{@[extern]} string-equality instance, all evaluation equations
+reduce under \texttt{simp}. Branching theorems supply a hypothesis
+\texttt{h} and discharge the \texttt{decide} call via
+\texttt{decide\_eq\_true h} or \texttt{decide\_eq\_false (not\_le.mpr h)}.

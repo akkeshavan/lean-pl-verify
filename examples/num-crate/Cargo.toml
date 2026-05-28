@@ -1,0 +1,11 @@
+[package]
+name = "num-verify"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+num-integer = "0.1"
+
+[lib]
+name = "num_verify"
+path = "src/lib.rs"

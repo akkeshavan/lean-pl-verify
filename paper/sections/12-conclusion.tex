@@ -1,0 +1,122 @@
+%% ============================================================
+%%  §12  Conclusion
+%% ============================================================
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+\subsection{Summary}
+
+We have presented lean-pl-verify, a Lean~4 library for cross-language formal
+verification. The central contribution is a pair of language-agnostic components
+— the \RustM execution monad and the \ProgramSpec specification language — into
+which programs from different source languages are independently embedded. Once
+in this common form, all specification and proof tools apply uniformly.
+
+The library contains \textbf{258 kernel-checked theorems} across 13 modules,
+with \textbf{0 sorry}:
+48 LLBC Rust theorems covering 16 functions (hand-crafted LLBC);
+14 theorems for the sumTo loop invariant;
+14 for factorial; 9 for Fibonacci;
+18 for full adequacy (soundness + completeness) of the relational semantics;
+57 over Charon-extracted function definitions (18 functions including \texttt{pow} and \texttt{gcd});
+5 for \texttt{Integer::is\_even<u32>} from the published \texttt{num-integer} v0.1.45 crate;
+39 TypeScript theorems including 6 cross-language unification results
+and a 6-theorem bug-detection case study;
+17 ProgramSpec combinators; 15 monad-level examples; 4 ownership laws;
+2 monad laws; and 16 proof automation demos.
+Full adequacy (soundness and completeness) is proved with 0 \sorry.
+The only trust anchor for proof correctness is the Lean~4 kernel;
+\lakeCmd{lake build Theorems} is the complete reproducibility certificate.
+
+\subsection{What Was Harder Than Expected}
+
+Three aspects of the development were more difficult than anticipated.
+
+\textbf{Fuel arithmetic.} Counting the correct fuel bound for a multi-step
+loop body requires tracking how fuel is consumed at each interpreter level.
+Off-by-one errors in this accounting were the most common source of proof
+failures. The \texttt{hpre := rfl} technique (\S\ref{sec:rust-proofs})
+emerged to isolate the prefix and loop phases.
+
+\textbf{Macro parsing in Lean~4.} The two-consecutive-term parsing issue
+(\S\ref{sec:automation}) was genuinely surprising. Lean~4's parser is a
+recursive descent parser with Pratt-style operator precedence; the interaction
+between macro syntax rules and term-level parsers is not always intuitive.
+
+\textbf{Adequacy proof patterns.} The \texttt{split at h} tactic for nested
+\texttt{match} reductions, and the \texttt{change} tactic for do-notation
+reduction steps, were non-obvious. Both are documented in
+\S\ref{sec:semantics} as reusable patterns for future adequacy proofs.
+
+\subsection{Limitations}
+
+\textbf{Safe Rust only.} Raw pointers, \texttt{unsafe} blocks, and
+concurrency are outside the model. For unsafe code, a separation logic
+layer (Iris~\cite{iris2015} or a Lean~4 analogue) would be needed.
+
+\textbf{Charon pipeline scope.} The Charon pipeline is demonstrated on
+18 functions, including non-trivial algorithms (\texttt{pow}, \texttt{gcd})
+that exercise Charon's UB-check infrastructure (\texttt{Rem} desugaring,
+overflow guards). Scaling to real-world crates with hundreds of
+functions, trait objects, and lifetimes requires further engineering.
+
+\textbf{Loop invariants are manual.} The inductive invariant patterns for
+\texttt{sumTo}, \texttt{fact}, and \texttt{fib} are provided by the proof
+engineer. Automated invariant synthesis for kernel-verified systems is an
+open problem.
+
+\textbf{Completeness of the TypeScript semantics.} A relational semantics
+for the TypeScript AST (analogous to the LLBC \texttt{EvalStmt} relation)
+and a full adequacy proof for the TypeScript evaluator are natural next steps,
+following the pattern of \texttt{Translation/Adequacy.lean}.
+
+\subsection{Future Work}
+
+\textbf{Scaling to real-world Rust crates.} We verified \texttt{Integer::is\_even<u32>}
+from \texttt{num-integer} v0.1.45 by running Charon directly on the crate source.
+The remaining \texttt{num-integer} functions use Stein's binary GCD, requiring
+\texttt{trailing\_zeros} intrinsics and signed bitwise AND, not yet in our
+evaluator's scope. Three concrete steps would enable broader coverage:
+(i)~adding signed bitwise operations (\texttt{BitAnd/BitOr/BitXor} for \texttt{Int});
+(ii)~modelling compiler intrinsics (\texttt{trailing\_zeros}, \texttt{count\_ones})
+as axiomatised functions with proved properties; and
+(iii)~automating loop invariant generation via an LLM agent loop —
+the agent writes a candidate invariant, the kernel rejects or accepts, and the
+loop iterates. This last step is the highest-leverage direction: the manual
+invariant work is the dominant cost in verifying loop-heavy code.
+
+\textbf{More languages.} The \ProgramSpec framework applies to any language
+whose semantics can be embedded as a \RustM computation. Python, C, or WASM
+would be natural targets; each would contribute new cross-language unification
+theorems.
+
+\textbf{Unsafe Rust.} Combining this work with an Iris-based model for
+unsafe abstractions (following the hybrid architecture of~\cite{rustbelt2018})
+would extend the verified fragment to programs using \texttt{Vec},
+\texttt{Arc}, and similar standard library types.
+
+\textbf{Automated loop invariants.} Integrating an invariant synthesis
+loop — perhaps using an AI agent in the style of the agentic development
+described in \S\ref{sec:agentic} — with the kernel-checked proof structure
+would reduce manual effort for loop-heavy programs.
+
+\textbf{Performance verification.} Extending \ProgramSpec with fuel-based
+complexity specifications — ``this function terminates in at most $f(n)$
+steps'' — would enable worst-case complexity proofs for verified programs.
+
+\subsection{Final Remark}
+
+Formal verification of systems software is hard. Tools exist for Rust, for C,
+for functional languages — but they do not talk to each other, and proving
+that a TypeScript function is correct in the same way as a Rust function
+means starting from scratch. This paper argues that the gap is smaller than
+it looks: a single monad and a single specification language, carefully
+designed, can span both.
+
+The \textbf{258 kernel-checked theorems} in lean-pl-verify are evidence for
+this claim. The Charon pipeline shows the framework connects to real Rust
+tooling. The relational semantics shows the interpreter is not an arbitrary
+artifact but has a principled denotation. And the six cross-language
+unification theorems are the clearest expression of the core idea: the
+specification does not know or care which language the program came from.

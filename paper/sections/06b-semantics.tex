@@ -1,0 +1,174 @@
+%% ============================================================
+%%  §6b  Relational Semantics and Interpreter Adequacy
+%% ============================================================
+
+\section{Relational Semantics and Interpreter Adequacy}
+\label{sec:semantics}
+
+The \texttt{Translation/ElabSpec.lean} theorems (\S\ref{sec:rust-proofs})
+prove that the \emph{fuel-based interpreter} produces correct outputs.
+A natural question is whether the interpreter faithfully captures the
+\emph{intended meaning} of LLBC programs — i.e., whether it is adequate
+with respect to a language-independent semantic ground truth.
+This section answers that question via a relational big-step semantics
+(\texttt{Translation/Semantics.lean}) and a soundness proof
+(\texttt{Translation/Adequacy.lean}).
+
+\subsection{Relational Big-Step Semantics}
+
+We define a standard inductive big-step operational semantics over the
+same runtime types (\texttt{Value}, \texttt{Locals}, \texttt{Signal},
+\texttt{FunEnv}) as the interpreter — sharing types avoids any
+translation layer in the adequacy proof.
+
+The semantics consists of six mutually inductive relations:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Relation} & \textbf{Judgment} & \textbf{Meaning} \\
+\midrule
+\texttt{EvalPlace}   & $s \vdash p \Downarrow v$           & Place $p$ reads value $v$ from locals $s$ \\
+\texttt{EvalOperand} & $s \vdash o \Downarrow v$           & Operand $o$ evaluates to $v$ \\
+\texttt{EvalRValue}  & $s \vdash r \Downarrow v$           & R-value $r$ evaluates to $v$ \\
+\texttt{EvalWrite}   & $s \xrightarrow{p := v} s'$         & Writing $v$ to place $p$ yields $s'$ \\
+\texttt{EvalStmt}    & $\Gamma \vdash s, \sigma \Downarrow \sigma', s'$ & Statement executes with signal $\sigma$ \\
+\texttt{EvalFun}     & $\Gamma \vdash f(\overline{v}) \Downarrow v'$ & Function call terminates with $v'$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+\textbf{Design choices.}
+Loops are handled by three rules — \texttt{loop\_cont} (body produces
+\texttt{next}; continue looping), \texttt{loop\_break} (body produces
+\texttt{break\_}; exit), and \texttt{loop\_return} (body produces
+\texttt{return\_}; propagate) — so the relation stays strictly inductive
+(no coinduction).
+Panics are modelled by \emph{absence} of a derivation: there is no
+$\texttt{EvalStmt}$ rule for division by zero or integer overflow.
+This matches the Lean convention that partial functions are undefined
+on bad inputs rather than mapped to an error value.
+
+\begin{lstlisting}[caption={Selected \texttt{EvalStmt} rules (Lean notation).},
+                   label={lst:evalstmt}]
+-- Sequential composition: s1 produces next, then s2 runs
+| seq_next {s1 s2 sig s s_mid s'} :
+    EvalStmt env s1 s .next s_mid →
+    EvalStmt env s2 s_mid sig s' →
+    EvalStmt env (.seq s1 s2) s sig s'
+
+-- Loop continues: body produces .next
+| loop_cont {body s s' s''} :
+    EvalStmt env body s .next s' →
+    EvalStmt env (.loop body) s' sig s'' →
+    EvalStmt env (.loop body) s sig s''
+
+-- Loop breaks: body produces .break_
+| loop_break {body s s'} :
+    EvalStmt env body s .break_ s' →
+    EvalStmt env (.loop body) s .next s'
+\end{lstlisting}
+
+\subsection{Soundness}
+
+The main adequacy theorem asserts that every output produced by the
+fuel-based interpreter is derivable in the relational semantics:
+
+\begin{lstlisting}[caption={Soundness of the LLBC interpreter.},
+                   label={lst:soundness}]
+theorem evalStmtFuel_sound
+    {env : FunEnv} {n : Nat} {stmt : LLBCStmt}
+    {s : Locals} {sig : Signal} {s' : Locals}
+    (h : evalStmtFuel env n stmt s = Except.ok (sig, s')) :
+    EvalStmt env stmt s sig s' := ...
+\end{lstlisting}
+
+\noindent
+The proof is by structural induction on $n$ (the fuel counter), with a
+case split on the statement constructor.
+Each case reduces the hypothesis \texttt{h} to a concrete
+\texttt{Except.ok} equation via \texttt{simp} and \texttt{split},
+then constructs the corresponding relational derivation.
+The proof comprises 14 theorems (0 sorry), covering all LLBC statement forms:
+\texttt{assign}, \texttt{return\_}, \texttt{skip}, \texttt{break\_},
+\texttt{continue\_}, \texttt{seq} (both next and abort variants),
+\texttt{ite}, \texttt{loop} (all three exit modes), and \texttt{call}.
+
+\paragraph{Key proof patterns.}
+Two patterns appear throughout the adequacy proof:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{\texttt{split at h}} for nested \texttt{match} reductions.
+        Using \texttt{rcases} + \texttt{simp} instead leads to lambda
+        alpha-renaming issues that break dependent pattern matching; \texttt{split}
+        avoids this by keeping the match scrutinee in the context.
+
+  \item \textbf{\texttt{change} for do-notation} reductions.
+        Lean's kernel reduces \texttt{do}-notation to nested \texttt{match} on
+        \texttt{Except.ok} / \texttt{Except.error}; the \texttt{change}
+        tactic asserts the reduced form explicitly, avoiding opaque unfolding
+        steps that would otherwise require \texttt{norm\_num} or \texttt{ring}.
+\end{itemize}
+
+\subsection{Completeness}
+
+The converse direction — every relational derivation is witnessed by
+some fuel bound — is proved as \texttt{evalStmtFuel\_complete}:
+
+\begin{lstlisting}[caption={Completeness of the LLBC interpreter.},
+                   label={lst:complete}]
+theorem evalStmtFuel_complete
+    {env : FunEnv} {stmt : LLBCStmt}
+    {s : Locals} {sig : Signal} {s' : Locals}
+    (h : EvalStmt env stmt s sig s') :
+    ∃ n, evalStmtFuel env n stmt s = Except.ok (sig, s') := ...
+\end{lstlisting}
+
+\noindent
+The proof proceeds by structural induction on the \texttt{EvalStmt} derivation.
+Two auxiliary lemmas are key:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{\texttt{evalStmtFuel\_mono\_one}}: if
+        \texttt{evalStmtFuel env n stmt s = .ok r}, then
+        \texttt{evalStmtFuel env (n+1) stmt s = .ok r}.
+        Proved by induction on $n$, case analysis on \texttt{stmt}.
+
+  \item \textbf{\texttt{evalStmtFuel\_mono}}: monotonicity for all $k$,
+        derived from \texttt{evalStmtFuel\_mono\_one} by induction on $k$.
+\end{itemize}
+
+\noindent
+For the \texttt{seq\_next} case, the existential witnesses are
+$\max(n_1, n_2) + 1$ where $n_1, n_2$ come from the two inductive
+hypotheses; \texttt{evalStmtFuel\_mono} is used to lift each sub-proof
+to the common bound.
+The \texttt{loop\_cont} case requires composing the monotonicity lemma for
+the body and the recursive loop call; this is the most technically intricate
+case but follows the same pattern.
+
+Together, \texttt{evalStmtFuel\_sound} and \texttt{evalStmtFuel\_complete}
+establish the \emph{full adequacy} of the interpreter: the fuel-based
+operational semantics and the inductive big-step semantics are extensionally
+equivalent. The \texttt{Translation/Adequacy.lean} file contains
+\textbf{19 theorems (0 \sorry)}.
+
+\subsection{Relationship to the Verification Pipeline}
+
+The relational semantics serves as the \emph{semantic ground truth} against
+which the interpreter is calibrated:
+
+\[
+  \underbrace{\texttt{evalStmtFuel}}_{\text{interpreter}}
+  \;\overset{\text{sound}}{\longrightarrow}\;
+  \underbrace{\texttt{EvalStmt}}_{\text{relational semantics}}
+\]
+
+The \texttt{ElabSpec} and \texttt{CharonSpec} theorems operate at the
+interpreter level. Soundness guarantees that any property proved there
+also holds in the relational model. This closes the semantic gap between
+the constructive evaluation approach (easy to compute with, easy to prove
+concrete instances by \texttt{rfl}) and the declarative inductive semantics
+(easy to reason about symbolically, standard in PL theory).

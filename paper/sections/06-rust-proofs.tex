@@ -1,0 +1,294 @@
+%% ============================================================
+%%  §6  Verification of Rust Programs via LLBC
+%% ============================================================
+
+\section{Verification of Rust Programs via LLBC}
+\label{sec:rust-proofs}
+
+The \texttt{Translation/ElabSpec.lean} module contains 48 theorems covering
+16 Rust functions. This section describes the four proof strategies used,
+then gives a detailed walkthrough of the loop invariant methodology using
+\texttt{sumTo} as the primary example.
+
+\subsection{Theorem Shape}
+
+All LLBC theorems have the same outer form:
+
+\begin{lstlisting}[caption={Standard LLBC theorem shape.},label={lst:thmshape}]
+theorem elab_f_correct (args...) (precond...) :
+    evalFun env fFun fuel args at () |=
+      .pureOutput (. = expected_value) := ...
+\end{lstlisting}
+
+The \texttt{at ()} applies the \texttt{RustM Unit Value} computation to the
+trivial unit state. Unfolding \texttt{satisfies}, this expands to:
+$\exists v,\; \texttt{evalFun env fFun fuel args () = .ok (v, ())} \wedge v = \text{expected}$.
+
+In practice, the proof witnesses $v$ directly and proves the two conjuncts
+separately: the first by kernel computation (often \rfl), the second by
+definition unfolding.
+
+\subsection{Pure Functions: Proof by \rfl}
+
+For functions with no conditional branches and no arithmetic overflow, the
+entire evaluation reduces by kernel computation:
+
+\begin{lstlisting}[caption={F1: return42 is proved by rfl.},label={lst:r42proof}]
+theorem elab_return42 :
+    evalFun [] return42Fun 5 [] at () |=
+      .pureOutput (. = .int 42) :=
+  (.int 42, (), rfl, rfl)
+\end{lstlisting}
+
+The \rfl in the first conjunct position asks the kernel to verify that
+\texttt{evalFun [] return42Fun 5 [] () = .ok (.int 42, ())}.
+The kernel unfolds \texttt{evalFun}, \texttt{evalFunBody}, \texttt{evalStmtFuel},
+\texttt{evalRValuePure}, \texttt{buildLocals}, and the \texttt{return42Fun}
+definition, reducing the entire expression to \texttt{.ok (.int 42, ())} in
+a few hundred reduction steps.
+
+This same strategy works for \texttt{id}, \texttt{neg}, and any function
+whose body is a finite sequence of unconditional assignments. The key
+requirement is that no \texttt{@[extern]} annotation blocks the reduction.
+
+\subsection{Arithmetic with Overflow: \texttt{if\_pos} Pattern}
+
+For functions that perform checked arithmetic, the interpreter's overflow guard
+introduces a conditional that cannot be resolved by kernel reduction alone:
+
+\begin{lstlisting}[caption={F4: add with overflow precondition.},label={lst:addproof}]
+theorem elab_add (x y : Int)
+    (h : minI32 <= x + y /\ x + y <= maxI32) :
+    evalFun [] addFun (10) [.int x, .int y] at () |=
+      .pureOutput (. = .int (x + y)) := by
+  refine (.int (x + y), (), ?_, rfl)
+  simp only [evalFun, evalFunBody, evalStmtFuel, buildLocals,
+    evalRValuePure, evalBinOpPure, evalOperandPure,
+    evalPlacePure, writePlacePure, List.set, List.replicate]
+  rw [if_pos h]
+  rfl
+\end{lstlisting}
+
+The \texttt{simp only} reduces all of the interpreter's helper functions
+except the overflow guard. The \texttt{rw [if\_pos h]} resolves the guard
+using the hypothesis $h$, after which \rfl closes the goal.
+
+This pattern — \texttt{simp only [interpreter lemmas]; rw [if\_pos h]; rfl}
+— applies uniformly to \texttt{sub} and \texttt{mul} as well. The only
+variation is the precondition $h$.
+
+\subsection{Conditionals: \texttt{decide\_eq\_true} Pattern}
+
+Comparison operations produce \texttt{.bool\_ (decide (a $\ge$ b) = true)},
+which requires a different reduction approach:
+
+\begin{lstlisting}[caption={F6: max function, ge branch.},label={lst:maxproof}]
+theorem elab_max_ge (a b : Int) (h : a >= b) :
+    evalFun [] maxFun 15 [.int a, .int b] at () |=
+      .pureOutput (. = .int a) := by
+  refine (.int a, (), ?_, rfl)
+  have hd : decide (a >= b) = true := decide_eq_true h
+  simp only [evalFun, ..., maxFun, hd, if_true]
+
+theorem elab_max_lt (a b : Int) (h : ¬(a >= b)) :
+    evalFun [] maxFun 15 [.int a, .int b] at () |=
+      .pureOutput (. = .int b) := by
+  refine (.int b, (), ?_, rfl)
+  have hd : decide (a >= b) = false := decide_eq_false h
+  simp only [evalFun, ..., maxFun, hd, if_false]
+
+-- Derived: both-case theorem using sat_pureOutput_mono
+theorem elab_max_either (a b : Int) :
+    evalFun [] maxFun 15 [.int a, .int b] at () |=
+      .pureOutput (. = .int (if a >= b then a else b)) := by
+  by_cases h : a >= b
+  . exact sat_pureOutput_mono (elab_max_ge a b h) (by simp [h])
+  . exact sat_pureOutput_mono (elab_max_lt a b h) (by simp [h])
+\end{lstlisting}
+
+The two-theorem pattern (one per branch) plus a derived ``either'' theorem
+is used for all conditional functions: \texttt{max}, \texttt{min}, \texttt{abs},
+\texttt{isZero}, \texttt{notGate}. The derived theorem is the most useful for
+consumers of the API; the branch-specific theorems are stepping stones.
+
+\subsection{Loop Invariant Methodology: The \texttt{sumTo} Walkthrough}
+
+The \texttt{sumTo(n)} function computes $\sum_{i=0}^{n-1} i = n(n-1)/2$
+(the Gauss formula) using a loop. This is the primary running example for
+the loop invariant methodology. Four components are needed:
+
+\begin{enumerate}[leftmargin=2em,label=\textbf{\arabic*.}]
+  \item A \emph{specification function} $\texttt{sumRange}(i, n)$
+        computing the partial sum $\sum_{k=i}^{n-1} k$.
+  \item An \emph{overflow predicate} \SumToOv asserting that, at every
+        remaining iteration, the accumulator stays within I32 bounds.
+  \item A \emph{loop-correct theorem} proved by induction on the remaining
+        iteration count.
+  \item A \emph{safety-implies-overflow bridge lemma} establishing that
+        safe inputs (here, $0 \le n \le 46\,340$) imply the overflow predicate.
+\end{enumerate}
+
+\subsubsection{Specification Function}
+
+\begin{lstlisting}[caption={sumRange specification.},label={lst:sumrange}]
+def sumRange : Int -> Int -> Int
+  | i, n => if i >= n then 0
+             else i + sumRange (i + 1) n
+termination_by n - i
+
+theorem sumRange_gaussSum (n : Int) (hn : 0 <= n) :
+    sumRange 0 n = n * (n - 1) / 2 := by
+  induction n with
+  | ofNat k => induction k with ...
+  | negSucc k => omega
+\end{lstlisting}
+
+\subsubsection{Overflow Predicate}
+
+\begin{lstlisting}[caption={SumToOv: overflow condition for sumTo.},label={lst:sumtoov}]
+def SumToOv (n acc i : Int) : Prop :=
+  forall  j : Int, i <= j -> j < n ->
+    (minI32 <= acc + sumRange i j /\
+     acc + sumRange i j <= maxI32) /\
+    (minI32 <= j + 1 /\ j + 1 <= maxI32)
+\end{lstlisting}
+
+This predicate is parametric in the current loop counter $i$ and the
+accumulator $\texttt{acc}$. At each iteration $j \in [i, n)$, it asserts that
+the accumulator at step $j$ (which is $\texttt{acc} + \texttt{sumRange}(i, j)$)
+stays in range, and the loop counter does not overflow.
+
+The critical step lemma says the predicate is preserved by one iteration:
+
+\begin{lstlisting}[caption={SumToOv_step: invariant preservation.},label={lst:sumtoovstep}]
+theorem SumToOv_step {n acc i : Int}
+    (hlt : i < n)
+    (hov : SumToOv n acc i) :
+    SumToOv n (acc + i) (i + 1) := by
+  intro j hj hjn
+  have := hov j (by omega) hjn
+  simpa [sumRange, hlt] using this
+\end{lstlisting}
+
+\subsubsection{Loop-Correct Theorem}
+
+\begin{lstlisting}[caption={sumTo_loop_correct: inductive invariant.},label={lst:sumtolc}]
+theorem sumTo_loop_correct
+    (k : Nat) (env : FunEnv)
+    (n acc i : Int) (c3 c4 : Value)
+    (heq  : (n - i).toNat = k)
+    (hi   : 0 <= i) (hin : i <= n)
+    (hinv : acc = sumRange 0 i)   -- invariant: acc accumulates sum so far
+    (hov  : SumToOv n acc i)
+    (fuel : Nat) (hfuel : k + 8 <= fuel) :
+    exists  c3' c4',
+    evalStmtFuel env fuel (.loop sumToBody)
+      [.unit, .int n, .int acc, .int i, c3, c4] =
+    .ok (.next, [.unit, .int n,
+                 .int (sumRange 0 n), .int n, c3', c4']) := by
+  induction k generalizing n acc i c3 c4 fuel with
+  | zero =>
+    -- i = n: loop exits, acc = sumRange 0 n
+    have hieqn : i = n := le_antisymm hin (by omega)
+    ...
+  | succ k' ih =>
+    -- i < n: one iteration advances i and adds i to acc
+    have hlt : i < n := by omega
+    ...
+    exact ih n (acc + i) (i + 1) ... (SumToOv_step hlt hov) ...
+\end{lstlisting}
+
+The induction variable is $k = (n - i).\texttt{toNat}$, the number of
+remaining iterations. The zero case ($k = 0$, \ie $i = n$) uses the
+\texttt{sumTo\_body\_false} step lemma to show the loop exits with the
+accumulator in its final state. The successor case ($k = k' + 1$) applies
+\texttt{sumTo\_body\_true} to advance one iteration, then calls the
+induction hypothesis with the updated accumulator and counter.
+
+\subsubsection{The \texttt{hpre} Technique}
+
+A subtle proof engineering challenge arises in the top-level theorem. The
+function body includes three prefix assignments (initialising \texttt{acc} and
+\texttt{i}) before the loop, then a postfix assignment reading the return value.
+If we unfold \texttt{evalFun} naively, the goal becomes:
+
+\begin{center}
+\small\texttt{evalStmtFuel env fuel (assign ... (assign ... (assign ... (loop sumToBody; assign ... return\_))))}
+\end{center}
+
+If the \texttt{simp} tactic attempts to simplify this as a whole, it will
+unfold the loop construct too eagerly, losing the structured induction.
+
+The solution is the \texttt{hpre} lemma pattern: we first prove a
+``prefix reduction'' fact by \rfl, which shows that the full body reduces to
+the loop with known initial state, \emph{without} unfolding the loop:
+
+\begin{lstlisting}[caption={hpre technique for prefix reduction.},label={lst:hpre}]
+have hpre : evalStmtFuel env (n.toNat + fuel_overhead) sumToFun.body
+    (buildLocals sumToFun [.int n]) =
+    (match evalStmtFuel env (n.toNat + k_overhead) (.loop sumToBody)
+         [.unit, .int n, .int 0, .int 0, .unit, .unit] with
+     | .ok (.next, s') =>
+         evalStmtFuel env ... (.assign (.var 0) (.use (.copy (.var 2))) .return_) s'
+     | other => other) := rfl
+\end{lstlisting}
+
+The \rfl succeeds because the Lean kernel can evaluate the prefix assignments
+and the \texttt{seq} combinator, stopping at the \texttt{loop} constructor.
+Once \texttt{hpre} is established, \texttt{simp only [evalFun, hpre, hloop]}
+closes the goal cleanly.
+
+\subsection{Factorial: Completing the Loop Invariant}
+
+The \texttt{fact} function's loop invariant follows the same pattern as
+\texttt{sumTo}, with \texttt{FactOv} replacing \SumToOv and
+\texttt{prodRange} replacing \texttt{sumRange}. All components are
+fully proved (0 \sorry): \texttt{fact\_body\_true}, \texttt{fact\_body\_false},
+\texttt{FactOv\_step}, \texttt{fact\_loop\_correct}, and the two auxiliary
+lemmas below.
+
+Two auxiliary lemmas required particular proof engineering:
+
+\begin{itemize}[leftmargin=1.5em]
+  \item \texttt{prodRange\_factorial}: $\prod_{k=1}^{n} k = n!$, proved by
+        induction on $n$ using a right-peel lemma
+        (\texttt{prodRange\_succ}) that decomposes $\prod_{k=1}^{n+1} k$
+        into $\prod_{k=1}^{n} k \cdot (n+1)$, closed by \texttt{omega}.
+  \item \texttt{factSafe\_implies\_ov}: for $0 \le j \le 12$,
+        $j! \le 12! < 2^{31} - 1$. Proved by \texttt{interval\_cases j}
+        (a Mathlib tactic that exhaustively cases over the 13 values)
+        followed by \texttt{norm\_num} at each leaf.
+\end{itemize}
+
+Both lemmas are verified by the Lean kernel with \textbf{0 \sorry}.
+The \texttt{FactInvariant.lean} file contributes 9 theorems to the total.
+
+\subsection{Ground Instances}
+
+For fixed inputs, every loop function reduces by kernel computation:
+
+\begin{lstlisting}[caption={Ground instances proved by rfl.},label={lst:ground}]
+-- sumTo(5) = 10 (Gauss formula: 5*4/2 = 10)
+theorem elab_sumTo_five :
+    evalFun [] sumToFun 20 [.int 5] at () |=
+      .pureOutput (. = .int 10) :=
+  (.int 10, (), rfl, rfl)
+
+-- fact(5) = 120
+theorem elab_fact_five :
+    evalFun [] factFun 60 [.int 5] at () |=
+      .pureOutput (. = .int 120) :=
+  (.int 120, (), rfl, rfl)
+
+-- fib(10) = 55
+theorem elab_fib_ten :
+    evalFun [] fibFun 25 [.int 10] at () |=
+      .pureOutput (. = .int 55) :=
+  (.int 55, (), rfl, rfl)
+\end{lstlisting}
+
+These are not trivial: the Lean kernel is literally executing the loop —
+all 5 iterations of \texttt{sumTo(5)}, all 5 iterations of \texttt{fact(5)},
+all 10 iterations of \texttt{fib(10)} — and confirming the result. The fact
+that \rfl succeeds is direct evidence that the interpreter is correctly
+encoding the loop semantics.

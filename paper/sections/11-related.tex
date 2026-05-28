@@ -1,0 +1,132 @@
+%% ============================================================
+%%  §11  Related Work
+%% ============================================================
+
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Rust Verification in Lean 4}
+
+\textbf{Aeneas}~\cite{ho2022aeneas} is the primary related system. It translates
+safe Rust programs via Charon into pure Lean~4 (and F$^\star$, Coq, HOL4)
+using a shallow monadic embedding. Aeneas and lean-pl-verify share the goal
+of Lean~4-based Rust verification and the use of a state-error monad, but
+they differ fundamentally in embedding strategy. In Aeneas, the Lean function
+generated for a Rust function \emph{is} the functional model; its correctness
+depends on the soundness of the Charon+Aeneas pipeline. In lean-pl-verify,
+the Lean definition of \texttt{evalStmtFuel} \emph{is} the semantics; there
+is nothing to be sound with respect to, beyond what the kernel computes.
+
+Recent applications of Aeneas include verified cryptographic
+primitives~\cite{aeneascrypto2026}: the BLAKE3, SHA-2, and Kyber
+implementations in the HACL* library. These verify real-world, production
+code at a scale that lean-pl-verify does not currently match. The advantage
+of Aeneas in this context is the Charon pipeline's ability to extract from
+arbitrary crates; our manual transcription limits scale.
+
+\textbf{LOOM}~\cite{loom2026} develops a framework for multi-modal
+foundational verification using Dijkstra monads in Lean~4. LOOM's goals
+overlap with ours (language-agnostic specifications, Lean~4 kernel as trust
+anchor), but LOOM operates on shallow program representations rather than
+deep AST embeddings. The Dijkstra monad index provides automated WP
+generation, which LOOM exploits for more automated proofs. Whether LOOM's
+approach can be extended to cross-language unification theorems similar to
+ours is an interesting open question.
+
+\subsection{Rust Verification via SMT}
+
+\textbf{Verus}~\cite{verus2023} is currently the most practical tool for
+verifying real-world Rust programs, with successful applications to distributed
+systems and operating system code. Verus embeds specifications directly into
+Rust source code using a ghost-type discipline; the Z3 SMT solver handles
+proof obligations. The principal limitation is the ``SMT cliff'': complex
+proofs, especially those involving non-linear arithmetic or intricate data
+structure invariants, can cause Z3 to time out. Verus does not support
+TypeScript and does not produce Lean kernel-checked proofs.
+
+\textbf{Creusot}~\cite{creusot2022} uses Why3 as a deductive verification
+backend. Programs are annotated with Rust attributes, and Creusot generates
+Why3 goals discharged by a portfolio of SMT solvers. It supports a wider
+fragment of Rust than Verus (notably, trait objects and iterators), but
+shares the reliance on SMT solvers in the TCB.
+
+\subsection{Bounded Verification}
+
+\textbf{Kani}~\cite{kani2022} is a bounded model checker for Rust built on
+CBMC. It handles unsafe Rust and concurrency by bounding the execution depth
+and encoding safety properties as assertions for a SAT/SMT solver. Kani
+excels at finding concrete bugs (memory unsafety, integer overflow in specific
+inputs) but cannot prove properties for all inputs or for loops with
+unbounded iteration counts. It does not produce formal proof certificates.
+
+\textbf{SEABMC} and related tools apply bounded symbolic execution to
+Rust via LLVM IR. They share Kani's strengths and limitations regarding
+unbounded verification.
+
+\subsection{Separation Logic and Unsafe Rust}
+
+\textbf{RustBelt}~\cite{rustbelt2018} is the foundational semantic model
+for Rust's type system, developed in Coq using the Iris separation logic
+framework~\cite{iris2015}. RustBelt proves that the Rust type system
+enforces memory safety even in the presence of unsafe code, by providing
+a semantic model for lifetimes and type invariants. The proofs are highly
+manual and cover only a small fragment of the standard library.
+
+Our work shares RustBelt's interest in formal semantics for Rust but
+targets a complementary level: functional correctness of safe programs
+rather than type-soundness of unsafe abstractions. Combining a
+RustBelt-style unsafe-code foundation with our safe-code verification
+layer would be a natural long-term goal, following the hybrid architecture
+proposed by Jung~\etal~\cite{rustbelt2018}.
+
+\subsection{Cross-Language and Multi-Language Verification}
+
+Cross-language correctness has been studied in the context of compilation
+verification~\cite{compcert2009}: if a compiler is verified to preserve
+semantics, then properties proved about the source program hold for the
+target. Our approach is different: we do not verify a compiler; we instead
+provide a common semantic target into which multiple source languages are
+independently embedded.
+
+\textbf{Bedrock2} and related work in the certified programming languages
+community has explored ``push-button'' verification of C code compiled to
+machine code, establishing end-to-end correctness from source to binary.
+The multi-language direction in lean-pl-verify is orthogonal: rather than
+going deeper (closer to hardware), we go wider (across languages).
+
+\textbf{F$^\star$}~\cite{fstar2016} supports multiple languages via a
+common F$^\star$ extraction target. The Low$^\star$ sublanguage is used
+to verify C programs; KReMLin extracts to C. This is structurally similar
+to our approach (common monad, multiple source embeddings) but F$^\star$'s
+multi-language support is directed at compilation rather than cross-language
+property sharing.
+
+\subsection{Proof Automation for Program Verification}
+
+Lean~4's \texttt{grind} tactic~\cite{lean4} combines congruence closure,
+E-matching, and linear arithmetic; it is designed precisely for program
+verification goals. We deliberately avoided \texttt{grind} in lean-pl-verify,
+preferring explicit \texttt{simp only} calls that make the proof state
+predictable. Whether \texttt{grind} could further compress the loop invariant
+proofs is unexplored.
+
+The Lean Squad project~\cite{leansquad2026} reports near-zero human labour
+verification of Rust programs using an LLM agent that drives the Lean LSP
+via the Model Context Protocol. This is architecturally different from our
+work (agent vs.\ manual proof writing) but shares the goal of using Lean~4
+as the verification target. The agent uses Aeneas for the Rust-to-Lean
+translation; combining the agent with our deep embedding would be an
+interesting experiment.
+
+\subsection{Domain-Specific Languages for Verification}
+
+\textbf{Dafny}~\cite{dafny2010} provides an integrated verification language
+where specifications (\texttt{ensures}/\texttt{requires}/\texttt{invariant})
+are interleaved with program code. It supports loops, recursive functions,
+and SMT-backed automation. Dafny does not target Rust or TypeScript.
+
+\textbf{DSLean}~\cite{dslean2026} develops a framework for type-correct
+interoperability between Lean~4 and external DSLs, using Lean's elaboration
+and metaprogramming to enforce typing in real time. This is related to our
+macro-based proof automation (\S\ref{sec:automation}) but aimed at DSL
+interoperability rather than proof compression.

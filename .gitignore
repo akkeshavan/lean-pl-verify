@@ -1,0 +1,45 @@
+# ── Lean / Lake build artifacts ──────────────────────────────────────────────
+.lake/
+
+# ── Rust / Cargo build artifacts ─────────────────────────────────────────────
+target/
+examples/rust-crate/target/
+examples/num-crate/target/
+
+# ── Python cache ──────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+
+# ── macOS metadata ────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Editor / IDE ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Claude Code internal ──────────────────────────────────────────────────────
+.claude/
+
+# ── Internal planning / scratch documents ─────────────────────────────────────
+plan.md
+AGENT.md
+
+# ── LaTeX build artifacts ─────────────────────────────────────────────────────
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+paper/*.toc
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+paper/*.run.xml
+paper/*.bcf
+paper/*.pdf
