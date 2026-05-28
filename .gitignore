@@ -26,6 +26,9 @@ __pycache__/
 # ── Claude Code internal ──────────────────────────────────────────────────────
 .claude/
 
+# ── Paper (kept separate from the code artifact) ──────────────────────────────
+paper/
+
 # ── Internal planning / scratch documents ─────────────────────────────────────
 plan.md
 AGENT.md
