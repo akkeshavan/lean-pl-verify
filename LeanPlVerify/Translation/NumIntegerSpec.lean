@@ -23,7 +23,11 @@
   (var4 = 2 == 0, kept as a dead assignment) are standard Charon outputs for
   signed/unsigned remainder on known-nonzero divisors.
 
-  Theorem count: 5, sorry count: 0.
+  Also includes `Integer::is_odd<u32>` (NI6–NI10):
+    Body: `*self % 2 != 0` — identical Charon output to is_even but final
+    assignment uses `.ne` instead of `.eq`.
+
+  Theorem count: 10, sorry count: 0.
 -/
 
 import LeanPlVerify.Translation.Elaborator
@@ -102,5 +106,60 @@ theorem num_is_even_seven :
 theorem num_is_even_nocrash (n : Nat) :
     evalFun [] NumIsEvenU32Fun 10 [.uint n] at () |= .nocrash :=
   sat_pureOutput_nocrash (num_is_even_symbolic n)
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- Integer::is_odd<u32>  (num-integer v0.1.45)
+-- ════════════════════════════════════════════════════════════════════════════
+
+/--
+  `num_integer::{Integer for u32}::is_odd`.
+  Body: `*self % 2 != 0`
+
+  Charon output is identical to is_even except the final assignment uses the
+  `.ne` (not-equal) binary operator instead of `.eq`.
+-/
+def NumIsOddU32Fun : LLBCFunDef := {
+  name   := "num_integer::is_odd<u32>"
+  params := [⟨1, .uint .U32, some "self"⟩]
+  locals := [
+    ⟨0, .bool_,    none⟩,
+    ⟨1, .uint .U32, some "self"⟩,
+    ⟨2, .uint .U32, none⟩,
+    ⟨3, .uint .U32, none⟩,
+    ⟨4, .bool_,    none⟩]
+  retTy  := .bool_
+  body   :=
+    (.assign (.var 3) (.use (.copy (.var 1)))
+    (.assign (.var 4) (.binOp .eq (.const (.uint 2 .U32)) (.const (.uint 0 .U32)))
+    (.assign (.var 2) (.binOp .rem (.move_ (.var 3)) (.const (.uint 2 .U32)))
+    (.assign (.var 0) (.binOp .ne (.move_ (.var 2)) (.const (.uint 0 .U32)))
+    .return_))))
+}
+
+/-- NI6 (symbolic): `is_odd(n) = (n % 2 ≠ 0)` for all `n : Nat`. -/
+theorem num_is_odd_symbolic (n : Nat) :
+    evalFun [] NumIsOddU32Fun 10 [.uint n] at () |=
+      .pureOutput (· = .bool_ (n % 2 != 0)) :=
+  ⟨.bool_ (n % 2 != 0), (), rfl, rfl⟩
+
+/-- NI7: `is_odd(0) = false`. -/
+theorem num_is_odd_zero :
+    evalFun [] NumIsOddU32Fun 10 [.uint 0] at () |= .pureOutput (· = .bool_ false) :=
+  ⟨.bool_ false, (), rfl, rfl⟩
+
+/-- NI8: `is_odd(1) = true`. -/
+theorem num_is_odd_one :
+    evalFun [] NumIsOddU32Fun 10 [.uint 1] at () |= .pureOutput (· = .bool_ true) :=
+  ⟨.bool_ true, (), rfl, rfl⟩
+
+/-- NI9: `is_odd(7) = true`. -/
+theorem num_is_odd_seven :
+    evalFun [] NumIsOddU32Fun 10 [.uint 7] at () |= .pureOutput (· = .bool_ true) :=
+  ⟨.bool_ true, (), rfl, rfl⟩
+
+/-- NI10: `is_odd` never crashes (no panics for any `u32` input). -/
+theorem num_is_odd_nocrash (n : Nat) :
+    evalFun [] NumIsOddU32Fun 10 [.uint n] at () |= .nocrash :=
+  sat_pureOutput_nocrash (num_is_odd_symbolic n)
 
 end LeanPlVerify.LLBC.NumIntegerSpec

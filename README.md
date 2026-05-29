@@ -6,10 +6,11 @@ lean-pl-verify embeds the LLBC intermediate representation (produced by [Charon]
 
 | Metric | Value |
 |--------|-------|
-| Total theorems | **258** |
+| Total theorems | **281** |
 | Sorry count | **0** |
 | Languages | Rust (via LLBC/Charon) + TypeScript |
-| Cross-language unification theorems | 6 |
+| Rust crates verified | 3 (hand-crafted suite, num-integer v0.1.45, GCD case study) |
+| Cross-language unification theorems | 6 (U1–U6) + 2 relational (A7–A8 via `agreesWith`) |
 | Lean version | `leanprover/lean4:v4.30.0-rc2` |
 
 ---
@@ -57,7 +58,7 @@ cd lean-pl-verify
 # Download Mathlib cache (~1 GB, needed once — avoids recompiling Mathlib)
 lake exe cache get
 
-# Verify all 258 theorems
+# Verify all 281 theorems (0 sorry)
 lake build Theorems
 ```
 
@@ -79,8 +80,8 @@ Expected output: `Build completed successfully.` (takes 5–15 minutes on first 
 ### Specification
 | File | Contents | Theorems |
 |------|----------|----------|
-| `Spec/ProgramSpec.lean` | `ProgramSpec` inductive: `pureOutput`, `nocrash`, `terminates`, `postcond`, `precond` | — |
-| `Spec/Satisfies.lean` | `m at s \|= spec` notation; satisfaction lemmas | 17 |
+| `Spec/ProgramSpec.lean` | `ProgramSpec` inductive: `pureOutput`, `nocrash`, `terminates`, `postcond`, `precond`, `terminatesIn`; plus `agreesWith` standalone def | — |
+| `Spec/Satisfies.lean` | `m at s \|= spec` notation; 21 satisfaction lemmas incl. `terminatesIn` + `agreesWith` | 21 |
 | `Spec/Examples.lean` | RustM-level examples E1–E8 | 15 |
 
 ### LLBC / Rust verification
@@ -98,10 +99,10 @@ Expected output: `Build completed successfully.` (takes 5–15 minutes on first 
 ### Charon end-to-end pipeline (auto-generated)
 | File | Contents | Theorems |
 |------|----------|----------|
-| `Translation/CharonDefs.lean` | **Auto-generated** by `charon2lean.py`: 18 `LLBCFunDef` values from real Rust | — |
-| `Translation/CharonSpec.lean` | 57 theorems over the auto-generated defs (including `pow`, `gcd`); 0 sorry | 57 |
-
-The pipeline: `verified_fns.rs` → **Charon** → LLBC JSON → **`charon2lean.py`** → `CharonDefs.lean` → proofs.
+| `Translation/CharonDefs.lean` | **Auto-generated** by `charon2lean.py`: 18 `LLBCFunDef` values extracted from real Rust | — |
+| `Translation/CharonSpec.lean` | 57 theorems over auto-generated defs (including `pow`, `gcd`); 0 sorry | 57 |
+| `Translation/NumIntegerSpec.lean` | 10 theorems for `is_even` + `is_odd` for `u32` from `num-integer` v0.1.45; 0 sorry | 10 |
+| `Translation/GcdCrateSpec.lean` | 10 theorems: GCD case study — zero args, coprimality, Mathlib bridge, `terminatesIn`; 0 sorry | 10 |
 
 ### Proof automation
 | File | Contents | Theorems |
@@ -109,20 +110,58 @@ The pipeline: `verified_fns.rs` → **Charon** → LLBC JSON → **`charon2lean.
 | `Tactic/VerifyFun.lean` | `llbc_verify`, `llbc_verify_loop`, `llbc_verify_cond`, `llbc_verify_prop` | — |
 | `Tactic/Examples.lean` | 16 theorems, each proved in one line with the macros | 16 |
 
-### TypeScript (cross-language unification)
+### TypeScript (cross-language unification + bug detection)
 | File | Contents | Theorems |
 |------|----------|----------|
 | `TypeScript/AST.lean` | `TSTy`, `TSExpr`, `TSStmt` (includes `while_` and `set_`), `TSFunDef` | — |
 | `TypeScript/Elaborator.lean` | `evalTSFun`, `evalStmt`, `evalExpr` — same `RustM` monad as Rust | — |
-| `TypeScript/ElabSpec.lean` | 39 theorems: T1–T14 functions + U1–U6 cross-language unification + bug-detection case study | 39 |
+| `TypeScript/ElabSpec.lean` | T1–T14 functions + U1–U6 cross-language unification + A7–A10 (`agreesWith` + `terminatesIn` demos) | 37 |
+| `TypeScript/BugDetection.lean` | B1–B6: bug detection case study (off-by-one, wrong zero guard) | 6 |
 
-**Theorem total: 2 + 4 + 17 + 15 + 48 + 18 + 14 + 14 + 9 + 57 + 16 + 39 = 258**
+**Theorem total: 2 + 4 + 21 + 15 + 48 + 18 + 14 + 14 + 9 + 57 + 10 + 10 + 16 + 37 + 6 = 281**
 
 ---
 
-## Charon pipeline (regenerating CharonDefs.lean)
+## Running individual modules
 
-This section explains how to install Charon from source and reproduce the auto-generated Lean definitions.
+You can build and verify any module independently:
+
+```bash
+# Foundation
+lake build LeanPlVerify.Foundation.Monad
+lake build LeanPlVerify.Foundation.Ownership
+
+# Specification framework
+lake build LeanPlVerify.Spec.Satisfies
+lake build LeanPlVerify.Spec.Examples
+
+# LLBC / Rust verification
+lake build LeanPlVerify.Translation.ElabSpec
+lake build LeanPlVerify.Translation.Semantics
+lake build LeanPlVerify.Translation.Adequacy
+lake build LeanPlVerify.Translation.LoopInvariant
+lake build LeanPlVerify.Translation.FactInvariant
+lake build LeanPlVerify.Translation.FibInvariant
+
+# Charon pipeline (auto-generated + verified)
+lake build LeanPlVerify.Translation.CharonDefs
+lake build LeanPlVerify.Translation.CharonSpec
+lake build LeanPlVerify.Translation.NumIntegerSpec
+lake build LeanPlVerify.Translation.GcdCrateSpec
+
+# Proof automation
+lake build LeanPlVerify.Tactic.Examples
+
+# TypeScript
+lake build LeanPlVerify.TypeScript.ElabSpec
+lake build LeanPlVerify.TypeScript.BugDetection
+```
+
+---
+
+## Case study: Charon end-to-end pipeline
+
+This pipeline extracts Lean definitions automatically from real Rust source and verifies them.
 
 ### Step 1: Install Charon from source
 
@@ -130,162 +169,214 @@ This section explains how to install Charon from source and reproduce the auto-g
 git clone https://github.com/AeneasVerif/charon
 cd charon
 git checkout v0.1.197    # pin to the version used in this artifact
-cargo build --release    # builds charon binary
-export PATH="$PWD/target/release:$PATH"   # add to PATH (or move binary to ~/.cargo/bin)
+cargo build --release
+cp target/release/charon ~/.cargo/bin/
+cp target/release/charon-driver ~/.cargo/bin/
 ```
 
 Verify: `charon --version` should print `charon 0.1.197`.
 
-**Note:** Charon requires the `rustc-dev` component for the nightly toolchain. This was installed in the Prerequisites step. Charon uses `rustup run nightly-2026-02-07 rustc` internally.
+**Note:** Charon requires the `rustc-dev` component for the nightly toolchain, installed in the Prerequisites step.
 
 ### Step 2: Run Charon on the example crate
 
 ```bash
-cd /path/to/lean-pl-verify/examples/rust-crate
+cd examples/rust-crate
 charon cargo --dest-file ../verified_fns.llbc
 ```
 
-This produces `examples/verified_fns.llbc` — a JSON file containing the LLBC ASTs of all 18 functions in `src/lib.rs` (return42, id, neg, add, sub, max, abs, is_zero, not_gate, clamp, sum_to, fact, mul, min, square, fib, pow, gcd).
+This produces `examples/verified_fns.llbc` — LLBC ASTs for all 18 functions in `src/lib.rs` (return42, id, neg, add, sub, max, abs, is_zero, not_gate, clamp, sum_to, fact, mul, min, square, fib, pow, gcd).
 
 ### Step 3: Translate LLBC JSON to Lean
 
 ```bash
-cd /path/to/lean-pl-verify
 python3 charon2lean.py examples/verified_fns.llbc \
     LeanPlVerify/Translation/CharonDefs.lean
 ```
 
-This overwrites `CharonDefs.lean` with one `def <Name>Fun : LLBCFunDef` per function.
+This overwrites `CharonDefs.lean` with one `def <Name>Fun : LLBCFunDef` per function. The existing file is already committed and builds correctly; this step only needs to be run if you modify `verified_fns.rs`.
 
-### Step 4: Verify the generated definitions build
+### Step 4: Verify the generated definitions
 
 ```bash
-lake build LeanPlVerify.Translation.CharonDefs
 lake build LeanPlVerify.Translation.CharonSpec
 ```
 
-Both should complete with 0 errors.
-
 ---
 
-## num-integer real-crate case study
+## Case study: num-integer real-crate verification
 
-This case study verifies `Integer::is_even<u32>` extracted directly from the published `num-integer` v0.1.45 crate (~45M downloads on crates.io).
-
-### Step 1: Run Charon on the num-crate wrapper
+This case study verifies `Integer::is_even<u32>` and `Integer::is_odd<u32>` extracted directly from the published `num-integer` v0.1.45 crate (~45M downloads on crates.io).
 
 ```bash
-cd /path/to/lean-pl-verify/examples/num-crate
+lake build LeanPlVerify.Translation.NumIntegerSpec
+```
+
+10 theorems (NI1–NI10):
+- `num_is_even_symbolic` — `is_even(n) = (n % 2 == 0)` for all `n : Nat` (symbolic)
+- `num_is_even_zero/four/seven` — ground instances; `num_is_even_nocrash` — no panics
+- `num_is_odd_symbolic` — `is_odd(n) = (n % 2 != 0)` for all `n : Nat` (symbolic)
+- `num_is_odd_zero/one/seven` — ground instances; `num_is_odd_nocrash` — no panics
+
+To regenerate the LLBC from the original crate (optional):
+
+```bash
+cd examples/num-crate
 charon cargo --dest-file ../num_verify.llbc
-```
-
-This produces `examples/num_verify.llbc`. The crate wraps `num-integer` functions with concrete types to force monomorphisation (see `src/lib.rs`).
-
-### Step 2: Inspect or translate
-
-The extracted LLBC for `is_even<u32>` is already embedded in `Translation/CharonSpec.lean` as the `IsEvenFun` definition. The 5 theorems proved over it are:
-
-- `is_even_zero` — `is_even(0) = true`
-- `is_even_one` — `is_even(1) = false`
-- `is_even_two` — `is_even(2) = true`
-- `is_even_neg_ok` — `is_even` on negative even → `true`
-- `is_even_spec` — general correctness: `is_even(n) = (n % 2 == 0)`
-
-### Step 3: Verify
-
-```bash
-lake build LeanPlVerify.Translation.CharonSpec
+python3 charon2lean.py examples/num_verify.llbc \
+    LeanPlVerify/Translation/NumIntegerDefs.lean
 ```
 
 ---
 
-## TypeScript case study
+## Case study: GCD algorithm (mathematical properties)
+
+This case study proves richer mathematical properties of the Euclidean GCD algorithm beyond ground instances, including connection to Mathlib's `Nat.gcd`.
+
+```bash
+lake build LeanPlVerify.Translation.GcdCrateSpec
+```
+
+10 theorems (GS1–GS10):
+- `gcd_zero_right (a)` — `gcd(a, 0) = a` (symbolic)
+- `gcd_zero_left_5/7` — `gcd(0, 5) = 5`, `gcd(0, 7) = 7`
+- `gcd_coprime_7_3` — `gcd(7, 3) = 1` (coprimality)
+- `gcd_48_36` — `gcd(48, 36) = 12`
+- `gcd_comm_8_12` — `gcd(8, 12) = 4` (commutativity instance, cf. CharonSpec `gcd_12_8`)
+- `gcd_mathlib_48_36/100_75` — `Nat.gcd 48 36 = 12`, `Nat.gcd 100 75 = 25` (Mathlib bridge)
+- `gcd_both_spec_48_36` — `.both (.pureOutput (·= .int 12)) (.terminatesIn 200)`
+- `gcd_nocrash_7_3` — no panics
+
+---
+
+## Case study: TypeScript cross-language unification
 
 TypeScript programs are verified using the same `RustM` monad and `ProgramSpec` specification language as Rust.
 
-### Running the TypeScript theorems
-
 ```bash
 lake build LeanPlVerify.TypeScript.ElabSpec
 ```
 
-This verifies 39 theorems covering:
+This verifies 37 theorems covering:
 
-- **T1–T14**: Pure functions (max, min, add, mul, neg, abs, is_zero, clamp, etc.)
-- **U1–U6**: Cross-language unification theorems — Rust LLBC and TypeScript implementations satisfy the *same* `ProgramSpec`
+- **T1–T14**: Pure TypeScript functions (max, min, add, mul, neg, abs, is_zero, clamp, etc.)
+- **U1–U6**: Cross-language unification — Rust LLBC and TypeScript implementations satisfy the *same* `ProgramSpec`
 - **while loop**: `ts_sumTo(n) = n*(n-1)/2` proved by induction
-- **Bug detection case study**: 6 theorems exposing off-by-one and wrong-guard bugs
+- **A7–A8**: `agreesWith` relational theorems — Rust `Value` and TypeScript `TSValue` agree on the underlying integer
+- **A9–A10**: Combined `pureOutput + terminatesIn` specs for Rust and TypeScript `neg`
 
-### Cross-language unification (example: U5)
+### Cross-language unification (example: U6)
 
 ```lean
-theorem unified_sumTo_ten :
-    (evalFun [] sumToFun 1000 [.int 10] at () |= .pureOutput (· = .int 45)) ∧
-    (evalTSFun tsSumToFun 100 [.num 10] at () |= .pureOutput (· = .num 45)) :=
-  ⟨elab_sumTo_ten, elab_ts_sumTo_ten⟩
+theorem unified_neg (x : Int) :
+    (evalFun [] negFun 10 [.int x] at () |= .pureOutput (· = .int (-x))) ∧
+    (evalTSFun tsNegFun 10 [TSValue.num x] at () |= .pureOutput (· = TSValue.num (-x))) :=
+  ⟨elab_neg x, elab_ts_neg x⟩
 ```
 
-The same specification `(.pureOutput (· = 45))` is satisfied by both the Rust LLBC embedding and the TypeScript AST embedding.
+The same spec `(.pureOutput (· = -x))` is satisfied by both the Rust LLBC embedding and the TypeScript AST embedding.
 
-### Bug detection case study
+### Relational agreement (example: A7)
 
-`TypeScript/ElabSpec.lean` contains a `tsWrongSumTo` function with two injected bugs: an off-by-one initialisation and a wrong loop guard. Six theorems in the file demonstrate that attempting to prove correctness for this function fails (the theorems prove incorrect *outputs*, demonstrating the framework catches the bugs).
+```lean
+theorem unified_neg_agreesWith (x : Int) :
+    ProgramSpec.agreesWith
+      (evalFun [] negFun 10 [.int x])
+      (evalTSFun tsNegFun 10 [TSValue.num x])
+      (fun v1 v2 => ∃ r : Int, v1 = .int r ∧ v2 = TSValue.num r)
+      ()
+```
+
+`agreesWith` is a single relational `Prop` that simultaneously witnesses both executions and the correspondence between their return values.
 
 ---
 
-## Running individual modules
+## Case study: TypeScript bug detection
 
-You can build and check any module individually:
+The Lean kernel acts as a bug oracle: if a program definition contains an error, a correctness proof attempt immediately reveals the wrong computed value.
 
 ```bash
-lake build LeanPlVerify.Foundation.Monad
-lake build LeanPlVerify.Spec.Satisfies
-lake build LeanPlVerify.Translation.ElabSpec
-lake build LeanPlVerify.Translation.Adequacy
-lake build LeanPlVerify.Translation.LoopInvariant
-lake build LeanPlVerify.Translation.FactInvariant
-lake build LeanPlVerify.Translation.FibInvariant
-lake build LeanPlVerify.Translation.CharonSpec
-lake build LeanPlVerify.Tactic.Examples
-lake build LeanPlVerify.TypeScript.ElabSpec
+lake build LeanPlVerify.TypeScript.BugDetection
 ```
+
+6 theorems in two categories:
+
+| Bug | Description | Kernel outcome |
+|-----|-------------|----------------|
+| B1 | `sum_to_buggy(5)`: loop uses `<=` instead of `<` | Kernel evaluates to 15 (should be 10) |
+| B2 | `sum_to_buggy(10)`: same off-by-one | Kernel evaluates to 55 (should be 45) |
+| B3 | `safeDivBuggy(10, -2)`: guard `b > 0` misses negatives | Kernel evaluates to 0 (should be -5) |
+| B4 | Fixed `safeDiv(10, -2)` | Kernel confirms -5 ✓ |
+| B5 | Fixed `safeDiv(10, 3)` | Kernel confirms 3 ✓ |
+| B6 | Fixed `safeDiv(10, 0)` | Kernel confirms 0 (no panic) ✓ |
+
+All 6 theorems are proved by `rfl` — no tactic machinery required.
 
 ---
 
 ## Troubleshooting
 
 **`lake exe cache get` fails with 404**
-Mathlib caching is tied to the exact Lean toolchain version. If the cache is unavailable for `v4.30.0-rc2`, let Mathlib compile from source (takes ~30–60 min):
+Mathlib caching is tied to the exact Lean toolchain version. If the cache is unavailable for `v4.30.0-rc2`, let Mathlib compile from source (takes 30–60 min):
 ```bash
 lake build Mathlib
 lake build Theorems
 ```
 
 **`charon cargo` fails with "can't find crate for `rustc_driver`"**
-The `rustc-dev` component is missing for the nightly toolchain:
+The `rustc-dev` component is missing:
 ```bash
 rustup component add rustc-dev --toolchain nightly-2026-02-07
 ```
 
-**`charon` binary not found after `cargo build --release`**
-Add the Charon target directory to your PATH or copy the binary:
+**`charon` binary not found**
 ```bash
 cp charon/target/release/charon ~/.cargo/bin/
+cp charon/target/release/charon-driver ~/.cargo/bin/
 ```
 
 **`lake build Theorems` fails with "unknown identifier" errors**
 The Lean toolchain version is wrong. Verify:
 ```bash
 cat lean-toolchain     # should print: leanprover/lean4:v4.30.0-rc2
-lean --version         # should print the same version
+lean --version         # should match
 ```
-If elan is not managing the toolchain, run `elan override set leanprover/lean4:v4.30.0-rc2` in the project directory.
+If elan is not managing the toolchain: `elan override set leanprover/lean4:v4.30.0-rc2`
 
 **`lake build` is extremely slow**
-The first build downloads and compiles Mathlib. Subsequent builds use the `.lake/build` cache. Run `lake exe cache get` first to download pre-built Mathlib oleans.
+The first build downloads and compiles Mathlib. Run `lake exe cache get` first to download pre-built Mathlib oleans (~1 GB, one-time download).
 
 **Python script fails with `KeyError` or `AttributeError`**
-The Charon LLBC JSON format evolved between versions. The script targets Charon v0.1.197. If you used a different version, the JSON schema may differ. Pin to `v0.1.197` as described in the Charon installation step.
+The Charon LLBC JSON format is version-specific. The script targets Charon v0.1.197. Pin to that version as described above.
+
+**`charon cargo` fails with "Override `nightly-2026-02-07` is not installed"**
+```bash
+rustup toolchain install nightly-2026-02-07
+rustup component add rustc-dev rust-src --toolchain nightly-2026-02-07
+```
+
+---
+
+## Repository structure
+
+```
+lean-pl-verify/
+├── LeanPlVerify/
+│   ├── Foundation/         # RustM monad, ownership model
+│   ├── Spec/               # ProgramSpec language and combinators
+│   ├── Translation/        # LLBC AST, interpreter, semantics, adequacy,
+│   │                       # loop invariants, Charon pipeline, NumInteger
+│   ├── Tactic/             # Proof automation macros
+│   └── TypeScript/         # TypeScript AST, evaluator, specs, bug detection
+├── theorems/
+│   └── AllTheorems.lean    # Single import hub: `lake build Theorems`
+├── examples/
+│   ├── rust-crate/         # Rust source for Charon extraction (verified_fns.rs)
+│   └── num-crate/          # Wrapper crate for num-integer extraction
+├── charon2lean.py          # LLBC JSON → LLBCFunDef translator
+├── lakefile.lean
+└── lean-toolchain          # leanprover/lean4:v4.30.0-rc2
+```
 
 ---
 

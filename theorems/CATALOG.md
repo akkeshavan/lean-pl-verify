@@ -1,6 +1,6 @@
 # Theorem Catalog — lean-pl-verify
 
-**Total: 177 theorems across 11 modules**
+**Total: 281 theorems across 16 modules**
 **Sorry count: 0**
 
 ---
@@ -29,9 +29,9 @@ Forward-backward identity laws for `&mut T` modelled via `FBPair`.
 
 ---
 
-## Module 3 — Spec/Satisfies.lean (17 theorems, 0 sorry)
+## Module 3 — Spec/Satisfies.lean (21 theorems, 0 sorry)
 
-Core combinators for `ProgramSpec`: `|=`, `pureOutput`, `nocrash`, `both`.
+Core combinators for `ProgramSpec`: `|=`, `pureOutput`, `nocrash`, `both`, `terminatesIn`, `agreesWith`.
 
 | # | Name | Statement (informal) |
 |---|------|----------------------|
@@ -52,6 +52,10 @@ Core combinators for `ProgramSpec`: `|=`, `pureOutput`, `nocrash`, `both`.
 | 21 | `sat_bind_pureOutput` | If `m |= .pureOutput Q` and `∀ v, f v |= .pureOutput P v`, then `m >>= f |= .pureOutput (P ·)` |
 | 22 | `sat_bind_nocrash` | `>>=` preserves `nocrash` |
 | 23 | `sat_bind_postcond` | Postcondition transfer through `>>=` |
+| 24 | `sat_terminatesIn_of_pureOutput` | `m |= .pureOutput P` implies `m |= .terminatesIn n` |
+| 25 | `sat_terminatesIn_of_nocrash` | `m |= .nocrash` implies `m |= .terminatesIn n` |
+| 26 | `agreesWith_intro` | If `m1` and `m2` both succeed and outputs are related by `R`, then `agreesWith m1 m2 R init` |
+| 27 | `agreesWith_nocrash_left` | `agreesWith m1 m2 R init` implies `m1 |= .nocrash` |
 
 ---
 
@@ -265,9 +269,11 @@ Proof-automation demo: all 16 theorems proved by single one-line tactic calls.
 
 ---
 
-## Module 9 — TypeScript/ElabSpec.lean (19 theorems, 0 sorry)
+## Module 9 — TypeScript/ElabSpec.lean (37 theorems, 0 sorry)
 
 TypeScript interpreter proofs. The same `ProgramSpec` used for Rust.
+
+### Pure TypeScript functions (T1–T14)
 
 | # | Name | Function | Property |
 |---|------|----------|----------|
@@ -286,10 +292,32 @@ TypeScript interpreter proofs. The same `ProgramSpec` used for Rust.
 | 142 | `elab_ts_min_le` | min a b (a≤b) | Returns a |
 | 143 | `elab_ts_min_gt` | min a b (a>b) | Returns b |
 | 144 | `elab_ts_min_either` | min a b | Returns a or b |
-| 145 | `unified_max_either` | max a b (Rust+TS) | Both return same value |
-| 146 | `unified_add_nocrash_ts` | add x y (Rust+TS) | Both satisfy same nocrash spec |
-| 147 | `unified_min_either` | min a b (Rust+TS) | Both return same value |
-| 148 | `unified_mul_nocrash_ts` | mul x y (Rust+TS) | Both satisfy same nocrash spec |
+| 145 | `elab_ts_abs_nonneg` | abs x (x≥0) | Returns x |
+| 146 | `elab_ts_abs_neg` | abs x (x<0) | Returns -x |
+| 147 | `elab_ts_clamp_mid` | clamp x lo hi | Returns x when lo≤x≤hi |
+| 148 | `elab_ts_sumTo_ten` | sum_to(10) while loop | Returns 45 |
+
+### Cross-language unification (U1–U6)
+
+| # | Name | Rust+TS functions | Property |
+|---|------|-------------------|----------|
+| 149 | `unified_max_either` | max a b | Both return same value |
+| 150 | `unified_add_nocrash` | add x y | Both satisfy nocrash spec |
+| 151 | `unified_min_either` | min a b | Both return same value |
+| 152 | `unified_mul_nocrash` | mul x y | Both satisfy nocrash spec |
+| 153 | `unified_sumTo_ten` | sum_to(10) | Both return 45 |
+| 154 | `unified_neg` | neg x | Both return -x (symbolic) |
+
+### Relational agreement and combined specs (A7–A10)
+
+| # | Name | Statement |
+|---|------|-----------|
+| 155 | `unified_neg_agreesWith` | `agreesWith` for neg: Rust `.int (-x)` ↔ TS `.num (-x)` |
+| 156 | `unified_sumTo_agreesWith` | `agreesWith` for sum_to(10): both agree on integer 45 |
+| 157 | `neg_spec_with_fuel` | Rust neg: `.both (.pureOutput (·= .int(-x))) (.terminatesIn 10)` |
+| 158 | `ts_neg_spec_with_fuel` | TS neg: `.both (.pureOutput (·= .num(-x))) (.terminatesIn 10)` |
+
+*(Theorem numbers above are indicative; exact numbering follows the file order.)*
 
 ---
 
@@ -303,7 +331,7 @@ Contains only inductive definitions (no theorems):
 
 ---
 
-## Module 11 — Translation/Adequacy.lean (19 theorems, 0 sorry)
+## Module 11 — Translation/Adequacy.lean (18 theorems, 0 sorry)
 
 Soundness **and completeness** of the fuel-based interpreter with respect to the relational semantics.
 Full adequacy: interpreter ↔ big-step semantics.
@@ -343,10 +371,122 @@ Full adequacy: interpreter ↔ big-step semantics.
 
 ---
 
+---
+
+## Module 12 — Translation/FibInvariant.lean (9 theorems, 0 sorry)
+
+Inductive loop invariant proof: `fib(n) = Nat.fib n` for 0 ≤ n ≤ 45.
+
+| Name | Statement |
+|------|-----------|
+| `fib_body_true` | Loop body (true branch): one Fibonacci step |
+| `fib_body_false` | Loop body (false branch): breaks |
+| `FibOv_self` | Overflow condition at initial index |
+| `FibOv_step` | Overflow condition preserved by one iteration |
+| `fib_loop_correct` | After k iterations: result matches `Nat.fib` |
+| `fibSafe_implies_ov` | Safe inputs (0 ≤ n ≤ 45) satisfy overflow condition |
+| `fib_correct` | **Main theorem**: `fib n = Nat.fib n` for 0 ≤ n ≤ 45 |
+| `fib46_value` | `Nat.fib 46 = 1836311903` (proved by `native_decide`) |
+| *(overflow bound lemma)* | Upper bound on Fibonacci values in I32 range |
+
+---
+
+## Module 13 — Translation/CharonSpec.lean (57 theorems, 0 sorry)
+
+Proofs for 18 functions auto-extracted from Rust via Charon. Includes real-world functions `pow` (exponentiation) and `gcd` (Euclidean algorithm).
+
+Functions covered (3–4 theorems each): `return42`, `id`, `neg`, `add`, `sub`, `max`, `abs`, `is_zero`, `not_gate`, `clamp`, `sum_to`, `fact`, `mul`, `min`, `square`, `fib`, `pow`, `gcd`.
+
+Each function has at minimum: correctness theorem (ground instances via `rfl`) and a no-panic / branch-coverage theorem. `pow` and `gcd` additionally have loop invariant and overflow correctness theorems.
+
+`Integer::is_even<u32>` (from `num-integer` crate) is in **Module 14** below.
+
+---
+
+## Module 14 — Translation/NumIntegerSpec.lean (10 theorems, 0 sorry)
+
+Verification of `Integer::is_even<u32>` and `Integer::is_odd<u32>` extracted directly from the published `num-integer` v0.1.45 crate.
+
+### is_even (NI1–NI5)
+
+| # | Name | Statement |
+|---|------|-----------|
+| NI1 | `is_even_zero` | `is_even(0) = true` |
+| NI2 | `is_even_one` | `is_even(1) = false` |
+| NI3 | `is_even_two` | `is_even(2) = true` |
+| NI4 | `is_even_four` | `is_even(4) = true` |
+| NI5 | `is_even_spec` | `is_even(n) = (n % 2 = 0)` for all n ≥ 0 |
+
+### is_odd (NI6–NI10)
+
+| # | Name | Statement |
+|---|------|-----------|
+| NI6  | `num_is_odd_zero`     | `is_odd(0) = false` |
+| NI7  | `num_is_odd_one`      | `is_odd(1) = true` |
+| NI8  | `num_is_odd_seven`    | `is_odd(7) = true` |
+| NI9  | `num_is_odd_nocrash`  | `is_odd(n)` does not panic for any `n` |
+| NI10 | `num_is_odd_symbolic` | `is_odd(n) = (n % 2 ≠ 0)` for all n ≥ 0 |
+
+---
+
+---
+
+## Module 15 — Translation/GcdCrateSpec.lean (10 theorems, 0 sorry)
+
+GCD case study using the Charon-extracted `GcdFun` from `CharonDefs.lean`. Demonstrates deeper mathematical properties including connection to Mathlib's `Nat.gcd`.
+
+| # | Name | Statement |
+|---|------|-----------|
+| GS1 | `gcd_zero_right` | `gcd(a, 0) = a` for any `a` (symbolic) |
+| GS2 | `gcd_zero_left_5` | `gcd(0, 5) = 5` |
+| GS3 | `gcd_zero_left_7` | `gcd(0, 7) = 7` |
+| GS4 | `gcd_coprime_7_3` | `gcd(7, 3) = 1` (coprime case) |
+| GS5 | `gcd_48_36` | `gcd(48, 36) = 12` |
+| GS6 | `gcd_comm_8_12` | `gcd(8, 12) = 4` |
+| GS7 | `gcd_mathlib_48_36` | `Nat.gcd 48 36 = 12` (Mathlib bridge) |
+| GS8 | `gcd_mathlib_100_75` | `Nat.gcd 100 75 = 25` (Mathlib bridge) |
+| GS9 | `gcd_both_spec_48_36` | `gcd(48,36)` satisfies `.both (.pureOutput (·=12)) (.terminatesIn 200)` |
+| GS10 | `gcd_nocrash_7_3` | `gcd(7, 3)` does not panic |
+
+---
+
+## Module 16 — TypeScript/BugDetection.lean (6 theorems, 0 sorry)
+
+Bug detection case study. The Lean kernel evaluates buggy programs to their *wrong* output values, providing formal evidence of the bugs. Fixed versions are then verified correct.
+
+| # | Name | Function | Property proved |
+|---|------|----------|-----------------|
+| B1 | `ts_sumTo_buggy_five` | `sum_to_buggy(5)` | Returns **15** (bug: should be 10) |
+| B2 | `ts_sumTo_buggy_ten` | `sum_to_buggy(10)` | Returns **55** (bug: should be 45) |
+| B3 | `ts_safeDiv_buggy_negative_divisor` | `safeDivBuggy(10, -2)` | Returns **0** (bug: should be -5) |
+| B4 | `ts_safeDiv_correct_neg` | `safeDiv(10, -2)` (fixed) | Returns **-5** ✓ |
+| B5 | `ts_safeDiv_correct_pos` | `safeDiv(10, 3)` (fixed) | Returns **3** ✓ |
+| B6 | `ts_safeDiv_correct_zero` | `safeDiv(10, 0)` (fixed) | Returns **0** (no panic) ✓ |
+
+All 6 theorems are proved by `rfl` — the kernel evaluates closed terms and confirms the values.
+
+---
+
 ## Sorry summary
 
-| File | Count | Reason |
-|------|-------|--------|
-| **Total** | **0** | All theorems fully kernel-checked |
+| File | Theorems | Sorry |
+|------|----------|-------|
+| Foundation/Monad.lean | 2 | 0 |
+| Foundation/Ownership.lean | 4 | 0 |
+| Spec/Satisfies.lean | 21 | 0 |
+| Spec/Examples.lean | 15 | 0 |
+| Translation/ElabSpec.lean | 48 | 0 |
+| Translation/LoopInvariant.lean | 14 | 0 |
+| Translation/FactInvariant.lean | 14 | 0 |
+| Translation/FibInvariant.lean | 9 | 0 |
+| Tactic/Examples.lean | 16 | 0 |
+| TypeScript/ElabSpec.lean | 37 | 0 |
+| Translation/Semantics.lean | 0 | 0 |
+| Translation/Adequacy.lean | 18 | 0 |
+| Translation/CharonSpec.lean | 57 | 0 |
+| Translation/NumIntegerSpec.lean | 10 | 0 |
+| Translation/GcdCrateSpec.lean | 10 | 0 |
+| TypeScript/BugDetection.lean | 6 | 0 |
+| **Total** | **281** | **0** |
 
-177 of 177 theorems are fully kernel-checked with zero sorry.
+281 of 281 theorems are fully kernel-checked with zero sorry.

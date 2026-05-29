@@ -145,4 +145,49 @@ theorem sat_bind_postcond {σ α β : Type}
   obtain ⟨r, s'', hr, hP⟩ := hf
   exact ⟨r, s'', (bind_eval hm).trans hr, hP⟩
 
+-- ── terminatesIn ────────────────────────────────────────────────────────────
+
+/-- A computation satisfying `pureOutput P` also satisfies `terminatesIn n`
+    for any declared fuel bound n. -/
+theorem sat_terminatesIn_of_pureOutput {σ α : Type} {m : RustM σ α} {init : σ}
+    {n : Nat} {P : α → Prop}
+    (h : m at init |= .pureOutput P) :
+    m at init |= .terminatesIn n := by
+  obtain ⟨v, s', hok, _⟩ := h
+  exact ⟨v, s', hok⟩
+
+/-- A computation satisfying `nocrash` also satisfies `terminatesIn n`. -/
+theorem sat_terminatesIn_of_nocrash {σ α : Type} {m : RustM σ α} {init : σ}
+    {n : Nat}
+    (h : m at init |= .nocrash) :
+    m at init |= .terminatesIn n := h
+
+-- ── agreesWith ──────────────────────────────────────────────────────────────
+
+/-- Introduction rule: if both computations succeed and outputs are related by R,
+    `agreesWith` holds. -/
+theorem agreesWith_intro {σ α β : Type} {m1 : RustM σ α} {m2 : RustM σ β} {init : σ}
+    {R : α → β → Prop} {v1 : α} {v2 : β} {s1' s2' : σ}
+    (h1 : m1 init = Except.ok (v1, s1'))
+    (h2 : m2 init = Except.ok (v2, s2'))
+    (hR : R v1 v2) :
+    ProgramSpec.agreesWith m1 m2 R init :=
+  ⟨v1, s1', v2, s2', h1, h2, hR⟩
+
+/-- If m1 agreesWith m2, then m1 does not crash. -/
+theorem agreesWith_nocrash_left {σ α β : Type} {m1 : RustM σ α} {m2 : RustM σ β} {init : σ}
+    {R : α → β → Prop}
+    (h : ProgramSpec.agreesWith m1 m2 R init) :
+    m1 at init |= .nocrash := by
+  obtain ⟨v1, s1', _, _, h1, _, _⟩ := h
+  exact ⟨v1, s1', h1⟩
+
+/-- agreesWith follows from two independent pureOutput proofs sharing a common value. -/
+theorem agreesWith_of_pureOutput {σ α β : Type} {m1 : RustM σ α} {m2 : RustM σ β}
+    {init : σ} {R : α → β → Prop}
+    (h1 : m1 at init |= .pureOutput (fun v1 => ∃ v2, R v1 v2 ∧ m2 init = Except.ok (v2, init)))
+    : ProgramSpec.agreesWith m1 m2 R init := by
+  obtain ⟨v1, s1', hok1, v2, hR, hok2⟩ := h1
+  exact ⟨v1, s1', v2, init, hok1, hok2, hR⟩
+
 end LeanPlVerify

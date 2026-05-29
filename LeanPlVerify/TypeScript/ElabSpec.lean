@@ -455,6 +455,61 @@ theorem unified_neg (x : Int) :
   ⟨elab_neg x, elab_ts_neg x⟩
 
 -- ════════════════════════════════════════════════════════════════════════════
+-- ProgramSpec extensions: agreesWith and terminatesIn
+-- ════════════════════════════════════════════════════════════════════════════
+
+/--
+  A7 — agreesWith version of U6 (neg):
+  `ProgramSpec.agreesWith` is a direct relational judgment naming both programs.
+  It replaces the conjunction `(Rust |= P) ∧ (TS |= P)` with a single statement
+  asserting that both computations succeed and encode the same integer r,
+  with R relating LLBC `Value` to TypeScript `TSValue` across the language boundary.
+-/
+theorem unified_neg_agreesWith (x : Int) :
+    ProgramSpec.agreesWith
+      (evalFun [] negFun 10 [.int x])
+      (evalTSFun tsNegFun 10 [TSValue.num x])
+      (fun (v1 : Value) (v2 : TSValue) => ∃ r : Int, v1 = .int r ∧ v2 = TSValue.num r)
+      () := by
+  obtain ⟨v1, s1', hok1, hv1⟩ := elab_neg x
+  obtain ⟨v2, s2', hok2, hv2⟩ := elab_ts_neg x
+  exact ⟨v1, s1', v2, s2', hok1, hok2, -x, hv1, hv2⟩
+
+/--
+  A8 — agreesWith version of U5 (sum_to, n=10):
+  Both Rust and TypeScript sum_to produce the same integer (45 for n=10).
+-/
+theorem unified_sumTo_agreesWith :
+    ProgramSpec.agreesWith
+      (evalFun [] sumToFun 1000 [.int 10])
+      (evalTSFun tsSumToFun 100 [TSValue.num 10])
+      (fun (v1 : Value) (v2 : TSValue) => ∃ r : Int, v1 = .int r ∧ v2 = TSValue.num r)
+      () := by
+  obtain ⟨h1, h2⟩ := unified_sumTo_ten
+  obtain ⟨v1, s1', hok1, hv1⟩ := h1
+  obtain ⟨v2, s2', hok2, hv2⟩ := h2
+  exact ⟨v1, s1', v2, s2', hok1, hok2, 45, hv1, hv2⟩
+
+/--
+  A9 — combined correctness+complexity spec for Rust neg:
+  `.both (.pureOutput P) (.terminatesIn n)` asserts output value and fuel bound
+  in a single `ProgramSpec` judgment.
+-/
+theorem neg_spec_with_fuel (x : Int) :
+    evalFun [] negFun 10 [.int x] at () |=
+      .both (.pureOutput (· = .int (-x))) (.terminatesIn 10) :=
+  sat_both_intro (elab_neg x) (sat_terminatesIn_of_pureOutput (elab_neg x))
+
+/--
+  A10 — combined correctness+complexity spec for TypeScript neg:
+  Same combined spec form for the TypeScript embedding.
+-/
+theorem ts_neg_spec_with_fuel (x : Int) :
+    evalTSFun tsNegFun 10 [TSValue.num x] at () |=
+      .both (.pureOutput (· = TSValue.num (-x))) (.terminatesIn 10) :=
+  sat_both_intro (elab_ts_neg x) (sat_terminatesIn_of_pureOutput (elab_ts_neg x))
+
+-- ════════════════════════════════════════════════════════════════════════════
 -- Theorem inventory
 -- ════════════════════════════════════════════════════════════════════════════
 

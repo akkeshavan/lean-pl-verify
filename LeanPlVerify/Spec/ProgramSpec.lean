@@ -46,6 +46,14 @@ inductive ProgramSpec (σ α : Type) : Type where
   /-- Conditionally: if init state satisfies P, then sub-spec holds. -/
   | precond    : (σ → Prop) → ProgramSpec σ α → ProgramSpec σ α
 
+  /-- Complexity witness: asserts the computation terminates (returns ok) within
+      a declared fuel budget n. The bound n is not verified against the interpreter
+      step count — it is an annotation that makes the fuel budget explicit in the
+      spec type, enabling combined correctness+complexity specifications of the form
+      `.both (.pureOutput P) (.terminatesIn n)`. -/
+  | terminatesIn : Nat → ProgramSpec σ α
+
+
 -- ── Satisfaction relation ───────────────────────────────────────────────────
 
 /--
@@ -75,6 +83,30 @@ def ProgramSpec.satisfies {σ α : Type}
 
   | .precond P s' =>
       P init → ProgramSpec.satisfies m init s'
+
+  | .terminatesIn _ =>
+      ∃ v s', m init = Except.ok (v, s')
+
+
+-- ── Relational agreement (cross-language) ───────────────────────────────────
+
+/--
+  `ProgramSpec.agreesWith m1 m2 R init`:
+  Both `m1` and `m2`, started from `init`, terminate successfully, and their
+  output values are related by `R`.  The result types `α` and `β` may differ,
+  which is essential when comparing across language embeddings
+  (e.g. Rust `Value` vs TypeScript `TSValue`).
+
+  This is a standalone `Prop` rather than a `ProgramSpec` constructor because
+  Lean 4 inductives cannot carry a free type variable `β` in a constructor
+  without universe-polymorphism complications.
+-/
+def ProgramSpec.agreesWith {σ α β : Type}
+    (m1 : RustM σ α) (m2 : RustM σ β) (R : α → β → Prop) (init : σ) : Prop :=
+  ∃ v1 s1' v2 s2',
+    m1 init = Except.ok (v1, s1') ∧
+    m2 init = Except.ok (v2, s2') ∧
+    R v1 v2
 
 -- ── Notation ────────────────────────────────────────────────────────────────
 

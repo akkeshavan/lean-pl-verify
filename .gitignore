@@ -28,6 +28,7 @@ __pycache__/
 
 # ── Paper (kept separate from the code artifact) ──────────────────────────────
 paper/
+paper-fac/
 
 # ── Internal planning / scratch documents ─────────────────────────────────────
 plan.md

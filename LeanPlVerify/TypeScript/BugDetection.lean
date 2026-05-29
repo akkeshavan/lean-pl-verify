@@ -27,7 +27,7 @@ import LeanPlVerify.Spec.Satisfies
 
 namespace LeanPlVerify.TypeScript.BugDetection
 
-open LeanPlVerify LeanPlVerify.TypeScript LeanPlVerify.LLBC LeanPlVerify.LLBC.Spec
+open LeanPlVerify LeanPlVerify.TypeScript
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- Bug B1/B2: off-by-one in sum_to (uses <= instead of <)
