@@ -6,10 +6,10 @@ lean-pl-verify embeds the LLBC intermediate representation (produced by [Charon]
 
 | Metric | Value |
 |--------|-------|
-| Total theorems | **281** |
+| Total theorems | **311** |
 | Sorry count | **0** |
 | Languages | Rust (via LLBC/Charon) + TypeScript |
-| Rust crates verified | 3 (hand-crafted suite, num-integer v0.1.45, GCD case study) |
+| Rust crates verified | 5 (hand-crafted suite, num-integer v0.1.45, GCD case study, bitops, arith-utils) |
 | Cross-language unification theorems | 6 (U1–U6) + 2 relational (A7–A8 via `agreesWith`) |
 | Lean version | `leanprover/lean4:v4.30.0-rc2` |
 
@@ -58,7 +58,7 @@ cd lean-pl-verify
 # Download Mathlib cache (~1 GB, needed once — avoids recompiling Mathlib)
 lake exe cache get
 
-# Verify all 281 theorems (0 sorry)
+# Verify all 311 theorems (0 sorry)
 lake build Theorems
 ```
 
@@ -101,8 +101,13 @@ Expected output: `Build completed successfully.` (takes 5–15 minutes on first 
 |------|----------|----------|
 | `Translation/CharonDefs.lean` | **Auto-generated** by `charon2lean.py`: 18 `LLBCFunDef` values extracted from real Rust | — |
 | `Translation/CharonSpec.lean` | 57 theorems over auto-generated defs (including `pow`, `gcd`); 0 sorry | 57 |
-| `Translation/NumIntegerSpec.lean` | 10 theorems for `is_even` + `is_odd` for `u32` from `num-integer` v0.1.45; 0 sorry | 10 |
+| `Translation/NumIntegerDefs.lean` | **Auto-generated**: `is_even` + `is_odd` for `u32` from `num-integer` v0.1.45 | — |
+| `Translation/NumIntegerSpec.lean` | 10 theorems for `is_even` + `is_odd`; 0 sorry | 10 |
 | `Translation/GcdCrateSpec.lean` | 10 theorems: GCD case study — zero args, coprimality, Mathlib bridge, `terminatesIn`; 0 sorry | 10 |
+| `Translation/BitopsDefs.lean` | **Auto-generated**: 6 bitflags-style `u32` set operations from `bitops-crate` | — |
+| `Translation/BitopsSpec.lean` | 15 theorems (BO1–BO15): is_empty, union, intersection, contains, intersects, sym_diff; 0 sorry | 15 |
+| `Translation/ArithUtilsDefs.lean` | **Auto-generated**: 4 `std::u32`-style arithmetic utilities from `arith-utils-crate` | — |
+| `Translation/ArithUtilsSpec.lean` | 15 theorems (AU1–AU15): div_ceil, abs_diff, midpoint, is_pow2; 0 sorry | 15 |
 
 ### Proof automation
 | File | Contents | Theorems |
@@ -118,7 +123,7 @@ Expected output: `Build completed successfully.` (takes 5–15 minutes on first 
 | `TypeScript/ElabSpec.lean` | T1–T14 functions + U1–U6 cross-language unification + A7–A10 (`agreesWith` + `terminatesIn` demos) | 37 |
 | `TypeScript/BugDetection.lean` | B1–B6: bug detection case study (off-by-one, wrong zero guard) | 6 |
 
-**Theorem total: 2 + 4 + 21 + 15 + 48 + 18 + 14 + 14 + 9 + 57 + 10 + 10 + 16 + 37 + 6 = 281**
+**Theorem total: 2 + 4 + 21 + 15 + 48 + 18 + 14 + 14 + 9 + 57 + 10 + 10 + 15 + 15 + 16 + 37 + 6 = 311**
 
 ---
 
@@ -148,6 +153,12 @@ lake build LeanPlVerify.Translation.CharonDefs
 lake build LeanPlVerify.Translation.CharonSpec
 lake build LeanPlVerify.Translation.NumIntegerSpec
 lake build LeanPlVerify.Translation.GcdCrateSpec
+
+# Bitops crate (Crate 4)
+lake build LeanPlVerify.Translation.BitopsSpec
+
+# ArithUtils crate (Crate 5)
+lake build LeanPlVerify.Translation.ArithUtilsSpec
 
 # Proof automation
 lake build LeanPlVerify.Tactic.Examples
@@ -214,7 +225,7 @@ lake build LeanPlVerify.Translation.NumIntegerSpec
 
 10 theorems (NI1–NI10):
 - `num_is_even_symbolic` — `is_even(n) = (n % 2 == 0)` for all `n : Nat` (symbolic)
-- `num_is_even_zero/four/seven` — ground instances; `num_is_even_nocrash` — no panics
+- `num_is_even_zero/two/four` — ground instances; `num_is_even_nocrash` — no panics
 - `num_is_odd_symbolic` — `is_odd(n) = (n % 2 != 0)` for all `n : Nat` (symbolic)
 - `num_is_odd_zero/one/seven` — ground instances; `num_is_odd_nocrash` — no panics
 
@@ -242,10 +253,86 @@ lake build LeanPlVerify.Translation.GcdCrateSpec
 - `gcd_zero_left_5/7` — `gcd(0, 5) = 5`, `gcd(0, 7) = 7`
 - `gcd_coprime_7_3` — `gcd(7, 3) = 1` (coprimality)
 - `gcd_48_36` — `gcd(48, 36) = 12`
-- `gcd_comm_8_12` — `gcd(8, 12) = 4` (commutativity instance, cf. CharonSpec `gcd_12_8`)
+- `gcd_comm_8_12` — `gcd(8, 12) = 4` (commutativity instance)
 - `gcd_mathlib_48_36/100_75` — `Nat.gcd 48 36 = 12`, `Nat.gcd 100 75 = 25` (Mathlib bridge)
 - `gcd_both_spec_48_36` — `.both (.pureOutput (·= .int 12)) (.terminatesIn 200)`
 - `gcd_nocrash_7_3` — no panics
+
+---
+
+## Case study: bitflags-style set operations (Crate 4)
+
+This case study verifies six core bitwise operations over `u32`, implementing the operations that the `bitflags` v2 crate generates for each flags type.
+
+```bash
+lake build LeanPlVerify.Translation.BitopsSpec
+```
+
+15 theorems (BO1–BO15), including symbolic proofs (all `n : Nat`) and ground instances:
+
+| Function | Spec |
+|----------|------|
+| `bf_is_empty(n)` | `= (n == 0)` |
+| `bf_union(a, b)` | `= a \|\|\| b` |
+| `bf_intersection(a, b)` | `= a &&& b` |
+| `bf_symmetric_diff(a, b)` | `= a ^^^ b` |
+| `bf_contains(flags, other)` | `= (flags &&& other == other)` |
+| `bf_intersects(a, b)` | `= (a &&& b != 0)` |
+
+Example (symbolic, all proofs by `rfl`):
+
+```lean
+theorem bitops_union_symbolic (a b : Nat) :
+    evalFun [] BfUnionFun 10 [.uint a, .uint b] at () |=
+      .pureOutput (· = .uint (a ||| b)) :=
+  ⟨.uint (a ||| b), (), rfl, rfl⟩
+```
+
+To regenerate from the Rust crate (optional):
+
+```bash
+cd examples/bitops-crate
+charon cargo --dest-file ../bitops.llbc
+python3 charon2lean.py examples/bitops.llbc \
+    LeanPlVerify/Translation/BitopsDefs.lean
+```
+
+---
+
+## Case study: std::u32-style arithmetic utilities (Crate 5)
+
+This case study verifies four arithmetic utilities analogous to the stable `std::u32` API (since Rust 1.73): ceiling division, unsigned absolute difference, overflow-safe midpoint, and power-of-two test.
+
+```bash
+lake build LeanPlVerify.Translation.ArithUtilsSpec
+```
+
+15 theorems (AU1–AU15), all ground instances, all proofs by `rfl`:
+
+| Function | Theorems | Examples |
+|----------|----------|---------|
+| `div_ceil(a, b)` | AU1–AU4 | `div_ceil(7,2)=4`, `div_ceil(8,2)=4`, `div_ceil(10,3)=4`, `div_ceil(9,3)=3` |
+| `abs_diff(a, b)` | AU5–AU7 | `abs_diff(7,3)=4`, `abs_diff(3,7)=4`, `abs_diff(5,5)=0` |
+| `midpoint(a, b)` | AU8–AU10 | `midpoint(0,8)=4`, `midpoint(3,7)=5`, `midpoint(3,5)=4` |
+| `is_pow2(n)` | AU11–AU15 | `is_pow2(0)=false`, `is_pow2(1)=true`, `is_pow2(2)=true`, `is_pow2(3)=false`, `is_pow2(8)=true` |
+
+Example:
+
+```lean
+theorem arith_div_ceil_7_2 :
+    evalFun [] DivCeilFun 100 [.uint 7, .uint 2] at () |=
+      .pureOutput (· = .uint 4) :=
+  ⟨.uint 4, (), rfl, rfl⟩
+```
+
+To regenerate from the Rust crate (optional):
+
+```bash
+cd examples/arith-utils-crate
+charon cargo --dest-file ../arith_utils.llbc
+python3 charon2lean.py examples/arith_utils.llbc \
+    LeanPlVerify/Translation/ArithUtilsDefs.lean
+```
 
 ---
 
@@ -365,15 +452,19 @@ lean-pl-verify/
 │   ├── Foundation/         # RustM monad, ownership model
 │   ├── Spec/               # ProgramSpec language and combinators
 │   ├── Translation/        # LLBC AST, interpreter, semantics, adequacy,
-│   │                       # loop invariants, Charon pipeline, NumInteger
+│   │                       # loop invariants, Charon pipeline, crate specs
 │   ├── Tactic/             # Proof automation macros
 │   └── TypeScript/         # TypeScript AST, evaluator, specs, bug detection
 ├── theorems/
-│   └── AllTheorems.lean    # Single import hub: `lake build Theorems`
+│   ├── AllTheorems.lean    # Single import hub: `lake build Theorems`
+│   └── CATALOG.md          # Full theorem catalog with statements
 ├── examples/
-│   ├── rust-crate/         # Rust source for Charon extraction (verified_fns.rs)
-│   └── num-crate/          # Wrapper crate for num-integer extraction
-├── charon2lean.py          # LLBC JSON → LLBCFunDef translator
+│   ├── rust-crate/         # Crate 1: 18-function hand-crafted suite
+│   ├── num-crate/          # Crate 2: wrapper for num-integer extraction
+│   ├── bitops-crate/       # Crate 4: bitflags-style set operations
+│   └── arith-utils-crate/  # Crate 5: std::u32-style arithmetic utilities
+├── paper-fac/              # FAC submission LaTeX source
+├── charon2lean.py          # LLBC JSON → LLBCFunDef translator (468 lines)
 ├── lakefile.lean
 └── lean-toolchain          # leanprover/lean4:v4.30.0-rc2
 ```

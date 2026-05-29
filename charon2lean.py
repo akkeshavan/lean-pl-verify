@@ -415,6 +415,8 @@ def main():
     global FUN_NAMES
     FUN_NAMES = {}
     for fn in funs:
+        if fn is None or fn.get("item_meta") is None:
+            continue
         name_parts = fn["item_meta"]["name"]
         fn_name    = name_parts[-1]["Ident"][0]
         FUN_NAMES[fn["def_id"]] = fn_name
@@ -449,6 +451,8 @@ open LeanPlVerify.LLBC
 
     bodies = []
     for fn in funs:
+        if fn is None or fn.get("item_meta") is None:
+            continue
         try:
             bodies.append(translate_fun(fn))
         except Exception as e:

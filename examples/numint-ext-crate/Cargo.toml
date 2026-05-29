@@ -1,0 +1,11 @@
+[package]
+name = "numint-ext"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+num-integer = "0.1"
+
+[lib]
+name = "numint_ext"
+path = "src/lib.rs"

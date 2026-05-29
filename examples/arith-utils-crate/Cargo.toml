@@ -1,0 +1,8 @@
+[package]
+name = "arith-utils-verify"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "arith_utils_verify"
+path = "src/lib.rs"

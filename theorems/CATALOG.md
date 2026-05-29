@@ -1,6 +1,6 @@
 # Theorem Catalog — lean-pl-verify
 
-**Total: 281 theorems across 16 modules**
+**Total: 311 theorems across 18 modules**
 **Sorry count: 0**
 
 ---
@@ -450,7 +450,32 @@ GCD case study using the Charon-extracted `GcdFun` from `CharonDefs.lean`. Demon
 
 ---
 
-## Module 16 — TypeScript/BugDetection.lean (6 theorems, 0 sorry)
+## Module 17 — Translation/ArithUtilsSpec.lean (15 theorems, 0 sorry)
+
+Verification of four `std::u32`-style arithmetic utilities extracted from the
+`arith-utils-verify` crate (analogous to stable API since Rust 1.73).
+
+| # | Name | Statement |
+|---|------|-----------|
+| AU1 | `arith_div_ceil_7_2` | `div_ceil(7, 2) = 4` (odd dividend, rounds up) |
+| AU2 | `arith_div_ceil_8_2` | `div_ceil(8, 2) = 4` (exact division) |
+| AU3 | `arith_div_ceil_10_3` | `div_ceil(10, 3) = 4` |
+| AU4 | `arith_div_ceil_9_3` | `div_ceil(9, 3) = 3` (exact division) |
+| AU5 | `arith_abs_diff_7_3` | `abs_diff(7, 3) = 4` (a > b branch) |
+| AU6 | `arith_abs_diff_3_7` | `abs_diff(3, 7) = 4` (b > a branch) |
+| AU7 | `arith_abs_diff_5_5` | `abs_diff(5, 5) = 0` (equal inputs) |
+| AU8 | `arith_midpoint_0_8` | `midpoint(0, 8) = 4` |
+| AU9 | `arith_midpoint_3_7` | `midpoint(3, 7) = 5` |
+| AU10 | `arith_midpoint_3_5` | `midpoint(3, 5) = 4` |
+| AU11 | `arith_is_pow2_zero` | `is_pow2(0) = false` |
+| AU12 | `arith_is_pow2_one` | `is_pow2(1) = true` |
+| AU13 | `arith_is_pow2_two` | `is_pow2(2) = true` |
+| AU14 | `arith_is_pow2_three` | `is_pow2(3) = false` |
+| AU15 | `arith_is_pow2_eight` | `is_pow2(8) = true` |
+
+---
+
+## Module 18 — TypeScript/BugDetection.lean (6 theorems, 0 sorry)
 
 Bug detection case study. The Lean kernel evaluates buggy programs to their *wrong* output values, providing formal evidence of the bugs. Fixed versions are then verified correct.
 
@@ -486,7 +511,9 @@ All 6 theorems are proved by `rfl` — the kernel evaluates closed terms and con
 | Translation/CharonSpec.lean | 57 | 0 |
 | Translation/NumIntegerSpec.lean | 10 | 0 |
 | Translation/GcdCrateSpec.lean | 10 | 0 |
+| Translation/BitopsSpec.lean | 15 | 0 |
+| Translation/ArithUtilsSpec.lean | 15 | 0 |
 | TypeScript/BugDetection.lean | 6 | 0 |
-| **Total** | **281** | **0** |
+| **Total** | **311** | **0** |
 
-281 of 281 theorems are fully kernel-checked with zero sorry.
+311 of 311 theorems are fully kernel-checked with zero sorry.

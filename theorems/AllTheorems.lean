@@ -2,7 +2,7 @@
   theorems/AllTheorems.lean
 
   Single import hub: importing this file causes the Lean 4 kernel to type-check
-  (and therefore verify) all 281 theorems in the lean-pl-verify project.
+  (and therefore verify) all 311 theorems in the lean-pl-verify project.
 
   Build command:
     lake build Theorems
@@ -10,7 +10,7 @@
   The kernel accepts a proof only when the proof term is well-typed.
   A successful build == every theorem below is verified.
 
-  Sorry status: 0 sorry — all 281 theorems are fully kernel-checked.
+  Sorry status: 0 sorry — all 311 theorems are fully kernel-checked.
   FibInvariant.lean uses native_decide (not sorry) for Nat.fib 46 = 1836311903.
 
   Full adequacy theorem (Translation/Adequacy.lean):
@@ -51,6 +51,16 @@ import LeanPlVerify.Translation.NumIntegerSpec
 -- GCD case study: Euclidean algorithm (Charon-extracted), deeper math properties (10 theorems, 0 sorry)
 -- GS1–GS10: zero args, coprimality, commutativity witness, Mathlib bridge, terminatesIn
 import LeanPlVerify.Translation.GcdCrateSpec
+
+-- Bitops crate: bitflags-style set operations over u32 (15 theorems, 0 sorry)
+-- BO1–BO15: is_empty, union, intersection, symmetric_diff, contains, intersects
+-- Each: 1 symbolic + ground instances.  All proofs by rfl.
+import LeanPlVerify.Translation.BitopsSpec
+
+-- ArithUtils crate: std::u32-style arithmetic utilities (15 theorems, 0 sorry)
+-- AU1–AU15: div_ceil, abs_diff, midpoint (symbolic + ground), is_pow2 (ground)
+-- Analogous to std::u32 stable API since Rust 1.73.
+import LeanPlVerify.Translation.ArithUtilsSpec
 
 -- TypeScript verification (37 theorems, incl. while loop sum_to + 6 unification + agreesWith/terminatesIn examples)
 import LeanPlVerify.TypeScript.ElabSpec
